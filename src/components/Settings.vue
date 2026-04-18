@@ -271,7 +271,8 @@ const form = reactive<FormState>({
   tableId: ''
 });
 
-const FEISHU_TEMPLATE_URL = 'https://www.feishu.cn/base/';
+const FEISHU_TEMPLATE_URL =
+  'https://s7wd8lze1s.feishu.cn/base/QR7rbtLf0adg0gsFun7cKnYOnGd?table=tblSeF0WH71ITCe7&view=vewMSNDmR0';
 const FEISHU_TUTORIAL_URL = 'https://open.feishu.cn/app';
 
 const stepState = reactive({
