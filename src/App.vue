@@ -48,6 +48,8 @@
           </button>
         </section>
 
+        <HabitView v-else-if="appStore.currentMode === 'habits'" />
+
         <section v-else class="flex min-h-0 flex-1 flex-col bg-transparent">
           <div class="px-3 pt-2">
             <StatsBar @add="createInlineVisible = true" />
@@ -168,6 +170,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { LogicalSize, PhysicalPosition } from '@tauri-apps/api/dpi';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -181,11 +184,16 @@ import StatusBar from './components/StatusBar.vue';
 import TaskList from './components/TaskList.vue';
 import TitleBar from './components/TitleBar.vue';
 import Welcome from './components/Welcome.vue';
+import HabitView from './views/HabitView.vue';
+import { useAppStore } from './stores/appStore';
+import { useHabitStore } from './stores/habitStore';
 import { usePetStore } from './stores/petStore';
 import { useTaskStore } from './stores/taskStore';
 import type { TaskFilter } from './stores/taskStore';
 import type { Task } from './types';
 import { WindowMode } from './types/pet';
+import { runDailyBackup } from './services/exportService';
+import { startHabitReminderService, startReminderService } from './utils/reminder';
 import { initializeTheme, toggleThemeQuickly, useThemeState } from './utils/theme';
 
 type ViewType = 'welcome' | 'main' | 'settings';
@@ -205,7 +213,14 @@ interface WindowModeChangedPayload {
   mini_mode: boolean;
 }
 
+interface SystemSettingsPayload {
+  auto_backup: boolean;
+  backup_retention_days: number;
+}
+
 const taskStore = useTaskStore();
+const appStore = useAppStore();
+const habitStore = useHabitStore();
 const petStore = usePetStore();
 const appWindow = getCurrentWindow();
 
@@ -220,6 +235,7 @@ const searchInputRef = ref<HTMLInputElement | null>(null);
 
 let miniStartPoint: { x: number; y: number } | null = null;
 let miniMouseMoveHandler: ((event: MouseEvent) => void) | null = null;
+const BACKUP_DATE_KEY = 'topdo_last_auto_backup_date';
 let miniMouseUpHandler: (() => void) | null = null;
 
 const toast = ref('');
@@ -228,6 +244,7 @@ let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 let unlistenResized: (() => void) | null = null;
 let unlistenWindowModeChanged: UnlistenFn | null = null;
 let unlistenFocusChanged: (() => void) | null = null;
+let unlistenTasksUpdated: UnlistenFn | null = null;
 let initialTraitsRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
 const deleteDialogVisible = ref(false);
@@ -359,6 +376,38 @@ async function onSettingsSaved(mode: 'local' | 'feishu') {
   } catch (error) {
     // 保持当前模式，仅提示错误
     showError(String(error));
+  }
+}
+
+function todayKey() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+async function maybeRunAutoBackup() {
+  try {
+    const settings = await invoke<SystemSettingsPayload>('get_system_settings');
+    if (!settings.auto_backup) return;
+    const today = todayKey();
+    if (localStorage.getItem(BACKUP_DATE_KEY) === today) return;
+    await runDailyBackup(taskStore.tasks, habitStore.habits, settings.backup_retention_days || 7);
+    localStorage.setItem(BACKUP_DATE_KEY, today);
+  } catch (error) {
+    console.warn('自动备份失败:', error);
+  }
+}
+
+async function ensureNotificationPermission() {
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) {
+      granted = (await requestPermission()) === 'granted';
+    }
+    if (!granted) {
+      console.warn('Topdo 通知权限未开启');
+    }
+  } catch (error) {
+    console.warn('请求通知权限失败:', error);
   }
 }
 
@@ -653,6 +702,12 @@ function onGlobalKeydown(event: KeyboardEvent) {
     return;
   }
 
+  if (isMeta && !isShift && key === 'j') {
+    event.preventDefault();
+    appStore.toggleMode();
+    return;
+  }
+
   if (isMeta && !isShift && key === 'k') {
     event.preventDefault();
     toggleShortcutSheet();
@@ -723,6 +778,8 @@ function onGlobalKeydown(event: KeyboardEvent) {
 
 onMounted(async () => {
   initializeTheme();
+  appStore.load();
+  await habitStore.fetchHabits().catch((error) => showError(String(error)));
   await petStore.load().catch(() => undefined);
   await syncWindowState();
   unlistenWindowModeChanged = await listen<WindowModeChangedPayload>('window-mode-changed', (event) => {
@@ -733,6 +790,9 @@ onMounted(async () => {
     if (payload.mode === 'cat') {
       void applyPetPosition();
     }
+  });
+  unlistenTasksUpdated = await listen('tasks-updated', () => {
+    void taskStore.fetchTasks().catch((error) => showError(String(error)));
   });
   try {
     const savedSize = await invoke<WindowSizePayload | null>('get_window_size');
@@ -762,6 +822,7 @@ onMounted(async () => {
   unlistenFocusChanged = await appWindow.onFocusChanged(({ payload }) => {
     if (payload) {
       void reapplyWindowTraits().then(() => reconcileWindowMode());
+      if (currentView.value === 'main') void taskStore.fetchTasks().catch((error) => showError(String(error)));
     }
   });
 
@@ -778,6 +839,12 @@ onMounted(async () => {
     petStore.windowMode = WindowMode.Panel;
   }
   await petStore.save();
+  await taskStore.initRecurringTasks().catch((error) => showError(String(error)));
+  await maybeRunAutoBackup();
+  await ensureNotificationPermission();
+  taskStore.startDailyRecurrenceCheck();
+  startReminderService(() => (appStore.reminderEnabled ? taskStore.tasks : []), (recordId) => taskStore.markTaskReminderNotified(recordId));
+  startHabitReminderService(() => habitStore.habits, () => habitStore.logs);
   await ensureInitialWindowTraitsApplied();
   maybeShowOnboarding();
   maybeShowShortcutTip();
@@ -800,6 +867,10 @@ onUnmounted(() => {
   if (unlistenFocusChanged) {
     unlistenFocusChanged();
     unlistenFocusChanged = null;
+  }
+  if (unlistenTasksUpdated) {
+    unlistenTasksUpdated();
+    unlistenTasksUpdated = null;
   }
   if (resizeTimer) {
     clearTimeout(resizeTimer);

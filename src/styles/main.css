@@ -8,6 +8,21 @@
   --primary-hover: #0066d6;
   --primary-active: #004ea2;
   --primary-light: #f0f7ff;
+  --accent-blue: #2563eb;
+  --accent-blue-light: #60a5fa;
+  --accent-blue-soft: #eff6ff;
+  --accent-purple: #7c3aed;
+  --accent-purple-soft: #f5f3ff;
+  --accent-amber: #d97706;
+  --accent-amber-soft: #fffbeb;
+  --accent-green: #16a34a;
+  --accent-green-soft: #f0fdf4;
+  --accent-red: #ef4444;
+  --accent-red-soft: #fef2f2;
+  --accent-slate: #475569;
+  --accent-slate-soft: #f1f5f9;
+  --accent-cyan: #0891b2;
+  --accent-cyan-soft: #ecfeff;
 
   /* 背景层级 */
   --bg-primary: rgba(255, 255, 255, 0.82);
@@ -41,6 +56,9 @@
   --seg-bg: #f0f0f0;
   --seg-active-bg: #ffffff;
   --seg-active-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.06);
+  --chart-bar: #dbeafe;
+  --stat-highlight-bg: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  --stat-highlight-border: #bfdbfe;
 
   /* 圆角 */
   --radius-window: 10px;
@@ -71,6 +89,21 @@ html[data-theme='dark'] {
   --primary-hover: #409cff;
   --primary-active: #0066cc;
   --primary-light: rgba(10, 132, 255, 0.2);
+  --accent-blue: #60a5fa;
+  --accent-blue-light: #93c5fd;
+  --accent-blue-soft: rgba(96, 165, 250, 0.16);
+  --accent-purple: #a78bfa;
+  --accent-purple-soft: rgba(167, 139, 250, 0.16);
+  --accent-amber: #fbbf24;
+  --accent-amber-soft: rgba(251, 191, 36, 0.14);
+  --accent-green: #34d399;
+  --accent-green-soft: rgba(52, 211, 153, 0.14);
+  --accent-red: #f87171;
+  --accent-red-soft: rgba(248, 113, 113, 0.14);
+  --accent-slate: #cbd5e1;
+  --accent-slate-soft: rgba(148, 163, 184, 0.14);
+  --accent-cyan: #22d3ee;
+  --accent-cyan-soft: rgba(34, 211, 238, 0.14);
 
   --bg-primary: rgba(28, 28, 30, 0.86);
   --bg-solid: #1c1c1e;
@@ -99,6 +132,9 @@ html[data-theme='dark'] {
   --seg-bg: #2a2a2c;
   --seg-active-bg: #3a3a3c;
   --seg-active-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.28);
+  --chart-bar: rgba(96, 165, 250, 0.24);
+  --stat-highlight-bg: linear-gradient(135deg, rgba(96, 165, 250, 0.18) 0%, rgba(37, 99, 235, 0.12) 100%);
+  --stat-highlight-border: rgba(96, 165, 250, 0.35);
 
   --traffic-inactive: #5f5f63;
   color-scheme: dark;

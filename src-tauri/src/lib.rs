@@ -19,11 +19,14 @@ use tauri::{
   Emitter,
   menu::{Menu, MenuItem},
   tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-  AppHandle, LogicalSize, Manager, Size, State, WebviewWindow,
+  AppHandle, LogicalPosition, LogicalSize, Manager, Position, Size, State, WebviewUrl, WebviewWindow,
+  WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 const MAIN_WINDOW_LABEL: &str = "main";
+const MENUBAR_WINDOW_LABEL: &str = "menubar";
+const QUICK_CAPTURE_WINDOW_LABEL: &str = "quick-capture";
 const NORMAL_WIDTH: f64 = 320.0;
 const NORMAL_HEIGHT: f64 = 500.0;
 const MINI_PET_WIDTH: f64 = 80.0;
@@ -37,6 +40,7 @@ const WINDOW_SIZE_FILE_NAME: &str = "window_size.json";
 const TOKEN_SALT: &str = "topdo-salt-2026";
 const DEFAULT_TOGGLE_SHORTCUT: &str = "Cmd+Shift+T";
 const DEFAULT_TOGGLE_MODE_SHORTCUT: &str = "Alt+T";
+const DEFAULT_QUICK_CAPTURE_SHORTCUT: &str = "Alt+Space";
 
 #[cfg(target_os = "macos")]
 const KCG_NORMAL_WINDOW_LEVEL_KEY: i32 = 4;
@@ -65,6 +69,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     sort_order INTEGER DEFAULT 0,
+    sub_tasks TEXT DEFAULT '[]',
+    due_date TEXT DEFAULT '',
     source TEXT DEFAULT 'local',
     feishu_record_id TEXT DEFAULT '',
     sync_status TEXT DEFAULT 'synced',
@@ -72,6 +78,31 @@ CREATE TABLE IF NOT EXISTS tasks (
     retry_count INTEGER DEFAULT 0,
     last_error TEXT DEFAULT '',
     last_retry_at TEXT DEFAULT ''
+);
+"#;
+
+const CREATE_HABITS_TABLE_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS habits (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  emoji TEXT NOT NULL DEFAULT '🎯',
+  color TEXT NOT NULL DEFAULT '#10b981',
+  frequency_type TEXT NOT NULL DEFAULT 'daily',
+  frequency_days TEXT DEFAULT NULL,
+  remind_time TEXT DEFAULT NULL,
+  target_days INTEGER DEFAULT NULL,
+  is_archived INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS habit_logs (
+  id TEXT PRIMARY KEY,
+  habit_id TEXT NOT NULL REFERENCES habits(id) ON DELETE CASCADE,
+  checked_at TEXT NOT NULL,
+  checked_time TEXT DEFAULT NULL,
+  note TEXT DEFAULT NULL,
+  UNIQUE(habit_id, checked_at)
 );
 "#;
 
@@ -121,6 +152,40 @@ struct ShortcutConfig {
   toggle_window: String,
   #[serde(default)]
   toggle_mode: String,
+  #[serde(default)]
+  quick_capture: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct SystemConfig {
+  #[serde(default = "default_true")]
+  menu_bar_enabled: bool,
+  #[serde(default = "default_true")]
+  close_to_menu_bar: bool,
+  #[serde(default)]
+  hide_dock_icon: bool,
+  #[serde(default = "default_quick_capture_shortcut")]
+  quick_capture_shortcut: String,
+  #[serde(default = "default_true")]
+  quick_capture_notify: bool,
+  #[serde(default = "default_true")]
+  auto_backup: bool,
+  #[serde(default = "default_backup_retention_days")]
+  backup_retention_days: i64,
+}
+
+impl Default for SystemConfig {
+  fn default() -> Self {
+    Self {
+      menu_bar_enabled: default_true(),
+      close_to_menu_bar: default_true(),
+      hide_dock_icon: false,
+      quick_capture_shortcut: default_quick_capture_shortcut(),
+      quick_capture_notify: default_true(),
+      auto_backup: default_true(),
+      backup_retention_days: default_backup_retention_days(),
+    }
+  }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -177,6 +242,8 @@ struct AppConfig {
   shortcut: ShortcutConfig,
   #[serde(default)]
   pet: PetConfig,
+  #[serde(default)]
+  system: SystemConfig,
   #[serde(default = "default_sync_interval")]
   sync_interval: i64,
   #[serde(default)]
@@ -218,6 +285,8 @@ struct GlobalShortcutState {
   toggle_window_text: String,
   toggle_mode: Option<tauri_plugin_global_shortcut::Shortcut>,
   toggle_mode_text: String,
+  quick_capture: Option<tauri_plugin_global_shortcut::Shortcut>,
+  quick_capture_text: String,
 }
 
 #[derive(Debug, Default)]
@@ -260,6 +329,13 @@ struct Task {
   completed_at: String,
   notes: String,
   sort_order: i64,
+  sub_tasks: String,
+  due_date: String,
+  recurrence_rule: String,
+  recurrence_parent_id: String,
+  recurrence_index: Option<i64>,
+  reminder_before: Option<i64>,
+  reminder_notified: bool,
   source: String,
   feishu_record_id: String,
   sync_status: String,
@@ -267,6 +343,30 @@ struct Task {
   retry_count: i64,
   last_error: String,
   last_retry_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Habit {
+  id: String,
+  name: String,
+  emoji: String,
+  color: String,
+  frequency_type: String,
+  frequency_days: String,
+  remind_time: String,
+  target_days: Option<i64>,
+  is_archived: bool,
+  created_at: String,
+  updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct HabitLog {
+  id: String,
+  habit_id: String,
+  checked_at: String,
+  checked_time: String,
+  note: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -303,6 +403,17 @@ struct ShortcutConfigPayload {
 #[derive(Debug, Serialize)]
 struct ModeShortcutConfigPayload {
   toggle_mode: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemSettingsPayload {
+  menu_bar_enabled: bool,
+  close_to_menu_bar: bool,
+  hide_dock_icon: bool,
+  quick_capture_shortcut: String,
+  quick_capture_notify: bool,
+  auto_backup: bool,
+  backup_retention_days: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -400,6 +511,18 @@ fn default_sync_interval() -> i64 {
   30
 }
 
+fn default_true() -> bool {
+  true
+}
+
+fn default_backup_retention_days() -> i64 {
+  7
+}
+
+fn default_quick_capture_shortcut() -> String {
+  DEFAULT_QUICK_CAPTURE_SHORTCUT.to_string()
+}
+
 fn default_pet_enabled() -> bool {
   true
 }
@@ -469,6 +592,15 @@ fn normalize_task(mut task: Task) -> Task {
   if task.task_type.trim().is_empty() {
     task.task_type = "日常事务".to_string();
   }
+  if task.sub_tasks.trim().is_empty() {
+    task.sub_tasks = "[]".to_string();
+  }
+  if task.recurrence_rule.trim().is_empty() {
+    task.recurrence_rule = String::new();
+  }
+  if task.recurrence_parent_id.trim().is_empty() {
+    task.recurrence_parent_id = String::new();
+  }
   if task.sync_status.trim().is_empty() {
     task.sync_status = "synced".to_string();
   }
@@ -499,26 +631,44 @@ fn to_feishu_priority_value(priority: &str) -> String {
 }
 
 fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
+  fn text(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<String> {
+    Ok(row.get::<_, Option<String>>(index)?.unwrap_or_default())
+  }
+
+  fn text_or(row: &rusqlite::Row<'_>, index: usize, default: &str) -> rusqlite::Result<String> {
+    Ok(row
+      .get::<_, Option<String>>(index)?
+      .filter(|value| !value.trim().is_empty())
+      .unwrap_or_else(|| default.to_string()))
+  }
+
   Ok(Task {
-    record_id: row.get(0)?,
-    id: row.get(1)?,
-    name: row.get(2)?,
-    status: row.get(3)?,
-    priority: row.get(4)?,
-    task_type: row.get(5)?,
-    time_spent: row.get(6)?,
-    created_at: row.get(7)?,
-    updated_at: row.get(8)?,
-    completed_at: row.get(9)?,
-    notes: row.get(10)?,
-    sort_order: row.get(11)?,
-    source: row.get(12)?,
-    feishu_record_id: row.get(13)?,
-    sync_status: row.get(14)?,
-    last_synced_at: row.get(15)?,
-    retry_count: row.get(16)?,
-    last_error: row.get(17)?,
-    last_retry_at: row.get(18)?,
+    record_id: text(row, 0)?,
+    id: text(row, 1)?,
+    name: text(row, 2)?,
+    status: text_or(row, 3, "待处理")?,
+    priority: text_or(row, 4, "普通")?,
+    task_type: text_or(row, 5, "日常事务")?,
+    time_spent: text(row, 6)?,
+    created_at: text(row, 7)?,
+    updated_at: text(row, 8)?,
+    completed_at: text(row, 9)?,
+    notes: text(row, 10)?,
+    sort_order: row.get::<_, Option<i64>>(11)?.unwrap_or(0),
+    sub_tasks: text_or(row, 12, "[]")?,
+    due_date: text(row, 13)?,
+    recurrence_rule: text(row, 14)?,
+    recurrence_parent_id: text(row, 15)?,
+    recurrence_index: row.get(16)?,
+    reminder_before: row.get(17)?,
+    reminder_notified: row.get::<_, Option<i64>>(18)?.unwrap_or(0) != 0,
+    source: text_or(row, 19, "local")?,
+    feishu_record_id: text(row, 20)?,
+    sync_status: text_or(row, 21, "synced")?,
+    last_synced_at: text(row, 22)?,
+    retry_count: row.get::<_, Option<i64>>(23)?.unwrap_or(0),
+    last_error: text(row, 24)?,
+    last_retry_at: text(row, 25)?,
   })
 }
 
@@ -552,9 +702,19 @@ fn open_db(path: &PathBuf) -> Result<Connection, String> {
   conn
     .execute_batch(CREATE_TASKS_TABLE_SQL)
     .map_err(|err| format!("init db failed: {err}"))?;
+  conn
+    .execute_batch(CREATE_HABITS_TABLE_SQL)
+    .map_err(|err| format!("init habits db failed: {err}"))?;
   ensure_column(&conn, "tasks", "id", "TEXT DEFAULT ''")?;
   ensure_column(&conn, "tasks", "completed_at", "TEXT DEFAULT ''")?;
   ensure_column(&conn, "tasks", "sort_order", "INTEGER DEFAULT 0")?;
+  ensure_column(&conn, "tasks", "sub_tasks", "TEXT DEFAULT '[]'")?;
+  ensure_column(&conn, "tasks", "due_date", "TEXT DEFAULT ''")?;
+  ensure_column(&conn, "tasks", "recurrence_rule", "TEXT DEFAULT ''")?;
+  ensure_column(&conn, "tasks", "recurrence_parent_id", "TEXT DEFAULT ''")?;
+  ensure_column(&conn, "tasks", "recurrence_index", "INTEGER DEFAULT NULL")?;
+  ensure_column(&conn, "tasks", "reminder_before", "INTEGER DEFAULT NULL")?;
+  ensure_column(&conn, "tasks", "reminder_notified", "INTEGER DEFAULT 0")?;
   ensure_column(&conn, "tasks", "source", "TEXT DEFAULT 'local'")?;
   ensure_column(&conn, "tasks", "feishu_record_id", "TEXT DEFAULT ''")?;
   ensure_column(&conn, "tasks", "retry_count", "INTEGER DEFAULT 0")?;
@@ -567,6 +727,36 @@ fn open_db(path: &PathBuf) -> Result<Connection, String> {
       [],
     )
     .map_err(|err| format!("backfill id failed: {err}"))?;
+  conn
+    .execute(
+      "UPDATE tasks SET sub_tasks = '[]' WHERE sub_tasks IS NULL OR sub_tasks = ''",
+      [],
+    )
+    .map_err(|err| format!("backfill sub_tasks failed: {err}"))?;
+  conn
+    .execute(
+      "UPDATE tasks SET due_date = '' WHERE due_date IS NULL",
+      [],
+    )
+    .map_err(|err| format!("backfill due_date failed: {err}"))?;
+  conn
+    .execute(
+      "UPDATE tasks SET recurrence_rule = '' WHERE recurrence_rule IS NULL",
+      [],
+    )
+    .map_err(|err| format!("backfill recurrence_rule failed: {err}"))?;
+  conn
+    .execute(
+      "UPDATE tasks SET recurrence_parent_id = '' WHERE recurrence_parent_id IS NULL",
+      [],
+    )
+    .map_err(|err| format!("backfill recurrence_parent_id failed: {err}"))?;
+  conn
+    .execute(
+      "UPDATE tasks SET sync_status = 'synced' WHERE sync_status IS NULL OR sync_status = ''",
+      [],
+    )
+    .map_err(|err| format!("backfill sync_status failed: {err}"))?;
   Ok(conn)
 }
 
@@ -575,8 +765,8 @@ fn upsert_task(conn: &Connection, task: &Task) -> Result<(), String> {
   conn
     .execute(
       "INSERT INTO tasks (
-        record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
-      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+        record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
       ON CONFLICT(record_id) DO UPDATE SET
         id=excluded.id,
         name=excluded.name,
@@ -593,6 +783,13 @@ fn upsert_task(conn: &Connection, task: &Task) -> Result<(), String> {
         END,
         notes=excluded.notes,
         sort_order=excluded.sort_order,
+        sub_tasks=excluded.sub_tasks,
+        due_date=excluded.due_date,
+        recurrence_rule=excluded.recurrence_rule,
+        recurrence_parent_id=excluded.recurrence_parent_id,
+        recurrence_index=excluded.recurrence_index,
+        reminder_before=excluded.reminder_before,
+        reminder_notified=excluded.reminder_notified,
         source=excluded.source,
         feishu_record_id=excluded.feishu_record_id,
         sync_status=excluded.sync_status,
@@ -613,6 +810,13 @@ fn upsert_task(conn: &Connection, task: &Task) -> Result<(), String> {
         task.completed_at,
         task.notes,
         task.sort_order,
+        task.sub_tasks,
+        task.due_date,
+        task.recurrence_rule,
+        task.recurrence_parent_id,
+        task.recurrence_index,
+        task.reminder_before,
+        if task.reminder_notified { 1 } else { 0 },
         task.source,
         task.feishu_record_id,
         task.sync_status,
@@ -799,6 +1003,45 @@ fn toggle_window_visibility(app: &AppHandle) -> tauri::Result<()> {
   Ok(())
 }
 
+fn position_menubar_window(app: &AppHandle, window: &WebviewWindow) {
+  if let Ok(Some(monitor)) = app.primary_monitor() {
+    let pos = monitor.position();
+    let size = monitor.size();
+    let scale = monitor.scale_factor();
+    let x = pos.x as f64 / scale + size.width as f64 / scale - 340.0;
+    let y = pos.y as f64 / scale + 34.0;
+    let _ = window.set_position(Position::Logical(LogicalPosition { x, y }));
+  }
+}
+
+fn toggle_menubar_window(app: &AppHandle) -> tauri::Result<()> {
+  if let Some(window) = app.get_webview_window(MENUBAR_WINDOW_LABEL) {
+    if window.is_visible().unwrap_or(false) {
+      window.hide()?;
+    } else {
+      position_menubar_window(app, &window);
+      window.show()?;
+      window.set_focus()?;
+      let _ = window.emit("menubar-opened", ());
+    }
+  }
+  Ok(())
+}
+
+fn toggle_quick_capture_window(app: &AppHandle) -> tauri::Result<()> {
+  if let Some(window) = app.get_webview_window(QUICK_CAPTURE_WINDOW_LABEL) {
+    if window.is_visible().unwrap_or(false) {
+      window.hide()?;
+    } else {
+      window.center()?;
+      window.show()?;
+      window.set_focus()?;
+      let _ = window.emit("quick-capture-focus", ());
+    }
+  }
+  Ok(())
+}
+
 fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
   if let Ok(dir) = app.path().app_data_dir() {
     migrate_legacy_app_data(&dir)?;
@@ -868,6 +1111,14 @@ fn window_size_file_path(app: &AppHandle) -> Result<PathBuf, String> {
   Ok(config_dir(app)?.join(WINDOW_SIZE_FILE_NAME))
 }
 
+fn export_dir(app: &AppHandle) -> Result<PathBuf, String> {
+  Ok(config_dir(app)?.join("exports"))
+}
+
+fn backup_dir(app: &AppHandle) -> Result<PathBuf, String> {
+  Ok(config_dir(app)?.join("backups"))
+}
+
 fn normalize_loaded_config(mut cfg: AppConfig) -> AppConfig {
   if cfg.mode.trim().is_empty() {
     cfg.mode = normalize_app_mode(&cfg.app_mode);
@@ -901,6 +1152,18 @@ fn normalize_loaded_config(mut cfg: AppConfig) -> AppConfig {
   if cfg.shortcut.toggle_mode.trim().is_empty() {
     cfg.shortcut.toggle_mode = DEFAULT_TOGGLE_MODE_SHORTCUT.to_string();
   }
+  if cfg.shortcut.quick_capture.trim().is_empty() {
+    cfg.shortcut.quick_capture = cfg.system.quick_capture_shortcut.trim().to_string();
+  }
+  if cfg.shortcut.quick_capture.trim().is_empty() {
+    cfg.shortcut.quick_capture = DEFAULT_QUICK_CAPTURE_SHORTCUT.to_string();
+  }
+  if cfg.system.quick_capture_shortcut.trim().is_empty() {
+    cfg.system.quick_capture_shortcut = cfg.shortcut.quick_capture.clone();
+  }
+  if cfg.system.backup_retention_days <= 0 {
+    cfg.system.backup_retention_days = default_backup_retention_days();
+  }
   cfg.pet.window_mode = normalize_window_mode(&cfg.pet.window_mode);
   cfg.pet.daily_progress_level = normalize_daily_progress_level(cfg.pet.daily_progress_level);
   cfg
@@ -913,8 +1176,10 @@ fn default_app_config() -> AppConfig {
     shortcut: ShortcutConfig {
       toggle_window: DEFAULT_TOGGLE_SHORTCUT.to_string(),
       toggle_mode: DEFAULT_TOGGLE_MODE_SHORTCUT.to_string(),
+      quick_capture: DEFAULT_QUICK_CAPTURE_SHORTCUT.to_string(),
     },
     pet: PetConfig::default(),
+    system: SystemConfig::default(),
     sync_interval: 30,
     created_at: now_iso(),
     app_mode: String::new(),
@@ -954,8 +1219,10 @@ fn load_app_config_from_file(app: &AppHandle) -> Result<AppConfig, String> {
         shortcut: ShortcutConfig {
           toggle_window: DEFAULT_TOGGLE_SHORTCUT.to_string(),
           toggle_mode: DEFAULT_TOGGLE_MODE_SHORTCUT.to_string(),
+          quick_capture: DEFAULT_QUICK_CAPTURE_SHORTCUT.to_string(),
         },
         pet: PetConfig::default(),
+        system: SystemConfig::default(),
         sync_interval: default_sync_interval_seconds(legacy.sync_interval_seconds),
         created_at: now_iso(),
         ..default_app_config()
@@ -1306,6 +1573,13 @@ async fn fetch_remote_tasks(app: &AppHandle, filter_completed: bool) -> Result<V
       completed_at: String::new(),
       notes: field_string(&record.fields, "备注/收获"),
       sort_order: 0,
+      sub_tasks: "[]".to_string(),
+      due_date: String::new(),
+      recurrence_rule: String::new(),
+      recurrence_parent_id: String::new(),
+      recurrence_index: None,
+      reminder_before: None,
+      reminder_notified: false,
       source: "feishu".to_string(),
       feishu_record_id: rid,
       sync_status: "synced".to_string(),
@@ -1540,7 +1814,7 @@ async fn db_get_all_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks",
       )
       .map_err(|err| format!("prepare query failed: {err}"))?;
@@ -1566,7 +1840,7 @@ async fn db_get_feishu_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks
          WHERE source = 'feishu'",
       )
@@ -1777,7 +2051,7 @@ async fn db_get_pending_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks
          WHERE sync_status IN ('pending', 'failed') AND source = 'feishu'
          ORDER BY updated_at ASC",
@@ -1900,8 +2174,8 @@ async fn get_local_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
-         FROM tasks WHERE source = 'local' ORDER BY sort_order ASC, updated_at DESC",
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+         FROM tasks WHERE source = 'local' ORDER BY sort_order DESC, updated_at DESC",
       )
       .map_err(|err| format!("prepare local tasks failed: {err}"))?;
     let rows = stmt
@@ -1952,6 +2226,13 @@ async fn create_local_task(
     completed_at: String::new(),
     notes: String::new(),
     sort_order: max_sort + 1,
+    sub_tasks: "[]".to_string(),
+    due_date: String::new(),
+    recurrence_rule: String::new(),
+    recurrence_parent_id: String::new(),
+    recurrence_index: None,
+    reminder_before: None,
+    reminder_notified: false,
     source: "local".to_string(),
     feishu_record_id: String::new(),
     sync_status: "synced".to_string(),
@@ -1978,20 +2259,24 @@ async fn update_local_task(
     let conn = open_db(&db_path)?;
     let mut task: Task = conn
       .query_row(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
-         FROM tasks WHERE id = ?1 AND source = 'local'",
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+         FROM tasks WHERE id = ?1 OR record_id = ?1",
         params![id.clone()],
         task_from_row,
       )
       .map_err(|err| format!("任务不存在: {err}"))?;
+    let original_sync_status = task.sync_status.clone();
+    let mut sync_affecting = false;
 
     if let Some(v) = fields.get("name") {
       if !v.trim().is_empty() {
         task.name = v.trim().to_string();
+        sync_affecting = true;
       }
     }
     if let Some(v) = fields.get("status") {
       task.status = v.trim().to_string();
+      sync_affecting = true;
       if task.status == "已完成" {
         task.completed_at = now_iso();
       } else {
@@ -2000,15 +2285,56 @@ async fn update_local_task(
     }
     if let Some(v) = fields.get("priority") {
       task.priority = v.trim().to_string();
+      sync_affecting = true;
     }
     if let Some(v) = fields.get("task_type") {
       task.task_type = v.trim().to_string();
+      sync_affecting = true;
     }
     if let Some(v) = fields.get("notes") {
       task.notes = v.to_string();
+      sync_affecting = true;
+    }
+    if let Some(v) = fields.get("sort_order") {
+      task.sort_order = v.parse::<i64>().unwrap_or(task.sort_order);
+    }
+    if let Some(v) = fields.get("sub_tasks") {
+      task.sub_tasks = if v.trim().is_empty() {
+        "[]".to_string()
+      } else {
+        v.to_string()
+      };
+    }
+    if let Some(v) = fields.get("due_date") {
+      task.due_date = v.trim().to_string();
+    }
+    if let Some(v) = fields.get("recurrence_rule") {
+      task.recurrence_rule = v.trim().to_string();
+    }
+    if let Some(v) = fields.get("recurrence_parent_id") {
+      task.recurrence_parent_id = v.trim().to_string();
+    }
+    if let Some(v) = fields.get("recurrence_index") {
+      task.recurrence_index = v.trim().parse::<i64>().ok();
+    }
+    if let Some(v) = fields.get("reminder_before") {
+      task.reminder_before = if v.trim().is_empty() {
+        None
+      } else {
+        v.trim().parse::<i64>().ok()
+      };
+    }
+    if let Some(v) = fields.get("reminder_notified") {
+      task.reminder_notified = matches!(v.trim(), "1" | "true" | "yes");
     }
     task.updated_at = now_iso();
-    task.sync_status = "synced".to_string();
+    task.sync_status = if task.source == "feishu" && !sync_affecting {
+      original_sync_status
+    } else if task.source == "feishu" {
+      "pending".to_string()
+    } else {
+      "synced".to_string()
+    };
 
     upsert_task(&conn, &task)?;
     Ok::<Task, String>(task)
@@ -2034,6 +2360,179 @@ async fn delete_local_task(app: AppHandle, id: String) -> Result<bool, String> {
   .map_err(|err| format!("db task join failed: {err}"))?
 }
 
+fn habit_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Habit> {
+  Ok(Habit {
+    id: row.get(0)?,
+    name: row.get(1)?,
+    emoji: row.get(2)?,
+    color: row.get(3)?,
+    frequency_type: row.get(4)?,
+    frequency_days: row.get(5)?,
+    remind_time: row.get(6)?,
+    target_days: row.get(7)?,
+    is_archived: row.get::<_, i64>(8)? != 0,
+    created_at: row.get(9)?,
+    updated_at: row.get(10)?,
+  })
+}
+
+fn habit_log_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HabitLog> {
+  Ok(HabitLog {
+    id: row.get(0)?,
+    habit_id: row.get(1)?,
+    checked_at: row.get(2)?,
+    checked_time: row.get(3)?,
+    note: row.get(4)?,
+  })
+}
+
+#[tauri::command]
+async fn get_habits(app: AppHandle) -> Result<Vec<Habit>, String> {
+  let db_path = db_file_path(&app)?;
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    let mut stmt = conn
+      .prepare("SELECT id, name, emoji, color, frequency_type, COALESCE(frequency_days, ''), COALESCE(remind_time, ''), target_days, is_archived, created_at, updated_at FROM habits ORDER BY created_at DESC")
+      .map_err(|err| format!("prepare habits failed: {err}"))?;
+    let rows = stmt.query_map([], habit_from_row).map_err(|err| format!("query habits failed: {err}"))?;
+    let mut habits = Vec::new();
+    for row in rows {
+      habits.push(row.map_err(|err| format!("decode habit failed: {err}"))?);
+    }
+    Ok::<Vec<Habit>, String>(habits)
+  })
+  .await
+  .map_err(|err| format!("db habit join failed: {err}"))?
+}
+
+#[tauri::command]
+async fn get_habit_logs(app: AppHandle) -> Result<Vec<HabitLog>, String> {
+  let db_path = db_file_path(&app)?;
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    let mut stmt = conn
+      .prepare("SELECT id, habit_id, checked_at, COALESCE(checked_time, ''), COALESCE(note, '') FROM habit_logs ORDER BY checked_at DESC")
+      .map_err(|err| format!("prepare habit logs failed: {err}"))?;
+    let rows = stmt.query_map([], habit_log_from_row).map_err(|err| format!("query habit logs failed: {err}"))?;
+    let mut logs = Vec::new();
+    for row in rows {
+      logs.push(row.map_err(|err| format!("decode habit log failed: {err}"))?);
+    }
+    Ok::<Vec<HabitLog>, String>(logs)
+  })
+  .await
+  .map_err(|err| format!("db habit log join failed: {err}"))?
+}
+
+#[tauri::command]
+async fn create_habit(app: AppHandle, fields: HashMap<String, String>) -> Result<Habit, String> {
+  let name = fields.get("name").map(|v| v.trim()).unwrap_or("");
+  if name.is_empty() {
+    return Err("习惯名称不能为空".to_string());
+  }
+  let id = uuid::Uuid::new_v4().to_string();
+  let now = now_iso();
+  let habit = Habit {
+    id: id.clone(),
+    name: name.to_string(),
+    emoji: fields.get("emoji").cloned().unwrap_or_else(|| "🎯".to_string()),
+    color: fields.get("color").cloned().unwrap_or_else(|| "#10b981".to_string()),
+    frequency_type: fields.get("frequency_type").cloned().unwrap_or_else(|| "daily".to_string()),
+    frequency_days: fields.get("frequency_days").cloned().unwrap_or_default(),
+    remind_time: fields.get("remind_time").cloned().unwrap_or_default(),
+    target_days: fields.get("target_days").and_then(|v| v.trim().parse::<i64>().ok()),
+    is_archived: false,
+    created_at: now.clone(),
+    updated_at: now,
+  };
+  let db_path = db_file_path(&app)?;
+  let save = habit.clone();
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    conn.execute(
+      "INSERT INTO habits (id, name, emoji, color, frequency_type, frequency_days, remind_time, target_days, is_archived, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+      params![save.id, save.name, save.emoji, save.color, save.frequency_type, save.frequency_days, save.remind_time, save.target_days, 0, save.created_at, save.updated_at],
+    ).map_err(|err| format!("insert habit failed: {err}"))?;
+    Ok::<(), String>(())
+  }).await.map_err(|err| format!("db habit join failed: {err}"))??;
+  Ok(habit)
+}
+
+#[tauri::command]
+async fn update_habit(app: AppHandle, id: String, fields: HashMap<String, String>) -> Result<Habit, String> {
+  let db_path = db_file_path(&app)?;
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    let mut habit: Habit = conn.query_row(
+      "SELECT id, name, emoji, color, frequency_type, COALESCE(frequency_days, ''), COALESCE(remind_time, ''), target_days, is_archived, created_at, updated_at FROM habits WHERE id = ?1",
+      params![id.clone()],
+      habit_from_row,
+    ).map_err(|err| format!("习惯不存在: {err}"))?;
+
+    if let Some(v) = fields.get("name") {
+      if !v.trim().is_empty() { habit.name = v.trim().to_string(); }
+    }
+    if let Some(v) = fields.get("emoji") { habit.emoji = v.to_string(); }
+    if let Some(v) = fields.get("color") { habit.color = v.to_string(); }
+    if let Some(v) = fields.get("frequency_type") { habit.frequency_type = v.to_string(); }
+    if let Some(v) = fields.get("frequency_days") { habit.frequency_days = v.to_string(); }
+    if let Some(v) = fields.get("remind_time") { habit.remind_time = v.to_string(); }
+    if let Some(v) = fields.get("target_days") { habit.target_days = v.trim().parse::<i64>().ok(); }
+    if let Some(v) = fields.get("is_archived") { habit.is_archived = matches!(v.trim(), "1" | "true" | "yes"); }
+    habit.updated_at = now_iso();
+
+    conn.execute(
+      "UPDATE habits SET name=?1, emoji=?2, color=?3, frequency_type=?4, frequency_days=?5, remind_time=?6, target_days=?7, is_archived=?8, updated_at=?9 WHERE id=?10",
+      params![habit.name, habit.emoji, habit.color, habit.frequency_type, habit.frequency_days, habit.remind_time, habit.target_days, if habit.is_archived { 1 } else { 0 }, habit.updated_at, habit.id],
+    ).map_err(|err| format!("update habit failed: {err}"))?;
+    Ok::<Habit, String>(habit)
+  }).await.map_err(|err| format!("db habit join failed: {err}"))?
+}
+
+#[tauri::command]
+async fn delete_habit(app: AppHandle, id: String) -> Result<bool, String> {
+  let db_path = db_file_path(&app)?;
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    conn.execute("DELETE FROM habit_logs WHERE habit_id = ?1", params![id.clone()]).map_err(|err| format!("delete habit logs failed: {err}"))?;
+    let affected = conn.execute("DELETE FROM habits WHERE id = ?1", params![id]).map_err(|err| format!("delete habit failed: {err}"))?;
+    Ok::<bool, String>(affected > 0)
+  }).await.map_err(|err| format!("db habit join failed: {err}"))?
+}
+
+#[tauri::command]
+async fn check_in_habit(app: AppHandle, habit_id: String, checked_at: String, checked_time: String, note: String) -> Result<HabitLog, String> {
+  let log = HabitLog {
+    id: uuid::Uuid::new_v4().to_string(),
+    habit_id,
+    checked_at,
+    checked_time,
+    note,
+  };
+  let db_path = db_file_path(&app)?;
+  let save = log.clone();
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    conn.execute(
+      "INSERT OR IGNORE INTO habit_logs (id, habit_id, checked_at, checked_time, note) VALUES (?1, ?2, ?3, ?4, ?5)",
+      params![save.id, save.habit_id, save.checked_at, save.checked_time, save.note],
+    ).map_err(|err| format!("insert habit log failed: {err}"))?;
+    Ok::<(), String>(())
+  }).await.map_err(|err| format!("db habit log join failed: {err}"))??;
+  Ok(log)
+}
+
+#[tauri::command]
+async fn uncheck_in_habit(app: AppHandle, habit_id: String, checked_at: String) -> Result<bool, String> {
+  let db_path = db_file_path(&app)?;
+  tokio::task::spawn_blocking(move || {
+    let conn = open_db(&db_path)?;
+    let affected = conn.execute("DELETE FROM habit_logs WHERE habit_id = ?1 AND checked_at = ?2", params![habit_id, checked_at]).map_err(|err| format!("delete habit log failed: {err}"))?;
+    Ok::<bool, String>(affected > 0)
+  }).await.map_err(|err| format!("db habit log join failed: {err}"))?
+}
+
 fn init_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
   let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
   let mini_item = MenuItem::with_id(app, "mini", "迷你模式", true, None::<&str>)?;
@@ -2043,9 +2542,11 @@ fn init_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
   let app_for_menu = app.clone();
   let app_for_tray = app.clone();
 
-  let mut tray_builder = TrayIconBuilder::new()
+  let tray_builder = TrayIconBuilder::new()
     .menu(&menu)
     .show_menu_on_left_click(false)
+    .title("Topdo")
+    .tooltip("Topdo")
     .on_menu_event(move |_tray, event| match event.id.as_ref() {
       "show" => {
         if let Some(window) = app_for_menu.get_webview_window(MAIN_WINDOW_LABEL) {
@@ -2087,15 +2588,49 @@ fn init_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ..
       } = event
       {
-        let _ = toggle_window_visibility(&app_for_tray);
+        let _ = toggle_menubar_window(&app_for_tray);
       }
     });
 
-  if let Some(icon) = app.default_window_icon() {
-    tray_builder = tray_builder.icon(icon.clone());
+  let _ = tray_builder.build(app)?;
+  Ok(())
+}
+
+fn create_system_windows(app: &mut tauri::App) -> tauri::Result<()> {
+  if app.get_webview_window(MENUBAR_WINDOW_LABEL).is_none() {
+    WebviewWindowBuilder::new(
+      app,
+      MENUBAR_WINDOW_LABEL,
+      WebviewUrl::App("index.html?window=menubar".into()),
+    )
+    .title("")
+    .inner_size(320.0, 420.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .visible(false)
+    .skip_taskbar(true)
+    .always_on_top(true)
+    .build()?;
   }
 
-  let _ = tray_builder.build(app)?;
+  if app.get_webview_window(QUICK_CAPTURE_WINDOW_LABEL).is_none() {
+    WebviewWindowBuilder::new(
+      app,
+      QUICK_CAPTURE_WINDOW_LABEL,
+      WebviewUrl::App("index.html?window=capture".into()),
+    )
+    .title("")
+    .inner_size(560.0, 56.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .visible(false)
+    .skip_taskbar(true)
+    .always_on_top(true)
+    .center()
+    .build()?;
+  }
   Ok(())
 }
 
@@ -2235,6 +2770,30 @@ fn register_mode_shortcut(
   Ok(())
 }
 
+fn register_quick_capture_shortcut(
+  app: &AppHandle,
+  shortcut: tauri_plugin_global_shortcut::Shortcut,
+  label: String,
+) -> Result<(), String> {
+  let manager = app.global_shortcut();
+  let state = app.state::<Mutex<GlobalShortcutState>>();
+  let old = {
+    let guard = state
+      .lock()
+      .map_err(|_| "failed to lock shortcut state".to_string())?;
+    guard.quick_capture.clone()
+  };
+
+  register_shortcut_with_rollback(&manager, old, shortcut.clone())?;
+
+  let mut guard = state
+    .lock()
+    .map_err(|_| "failed to lock shortcut state".to_string())?;
+  guard.quick_capture = Some(shortcut);
+  guard.quick_capture_text = label;
+  Ok(())
+}
+
 fn set_window_mode_internal(app: &AppHandle, mode: &str) -> Result<(), String> {
   let normalized_mode = normalize_window_mode(mode);
   let window = get_main_window(app)?;
@@ -2302,6 +2861,15 @@ fn init_global_shortcut(app: &AppHandle) -> Result<(), Box<dyn std::error::Error
               };
               let next_mode = if current_mode == "cat" { "panel" } else { "cat" };
               let _ = set_window_mode_internal(&app_for_handler, next_mode);
+              return;
+            }
+            if state
+              .quick_capture
+              .as_ref()
+              .map(|shortcut| shortcut.id() == shortcut_id)
+              .unwrap_or(false)
+            {
+              let _ = toggle_quick_capture_window(&app_for_handler);
             }
           }
         }
@@ -2373,6 +2941,26 @@ fn init_global_shortcut(app: &AppHandle) -> Result<(), Box<dyn std::error::Error
         .expect("default mode shortcut should be valid");
       register_mode_shortcut(app, fallback_shortcut, fallback_label)
         .map_err(Box::<dyn std::error::Error>::from)?;
+    }
+  }
+
+  let raw_quick_capture_shortcut = cfg.shortcut.quick_capture.trim();
+  let quick_capture_shortcut_text = if raw_quick_capture_shortcut.is_empty() {
+    DEFAULT_QUICK_CAPTURE_SHORTCUT
+  } else {
+    raw_quick_capture_shortcut
+  };
+  match parse_shortcut_input(quick_capture_shortcut_text) {
+    Ok((shortcut, label)) => {
+      if let Err(err) = register_quick_capture_shortcut(app, shortcut, label.clone()) {
+        eprintln!("[Rust] register configured quick capture shortcut failed: {}", err);
+      }
+    }
+    Err(err) => {
+      eprintln!("[Rust] parse configured quick capture shortcut failed: {}", err);
+      if let Ok((fallback_shortcut, fallback_label)) = parse_shortcut_input(DEFAULT_QUICK_CAPTURE_SHORTCUT) {
+        let _ = register_quick_capture_shortcut(app, fallback_shortcut, fallback_label);
+      }
     }
   }
 
@@ -2453,6 +3041,116 @@ fn restore_normal_mode(app: AppHandle, state: State<'_, Mutex<UiState>>) -> Resu
 fn hide_window_to_tray(app: AppHandle) -> Result<(), String> {
   let window = get_main_window(&app)?;
   window.hide().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn show_main_window(app: AppHandle) -> Result<(), String> {
+  let window = get_main_window(&app)?;
+  set_window_mode_internal(&app, "panel")?;
+  window.unminimize().map_err(|err| err.to_string())?;
+  window.show().map_err(|err| err.to_string())?;
+  window.set_focus().map_err(|err| err.to_string())?;
+  Ok(())
+}
+
+#[tauri::command]
+fn show_quick_capture(app: AppHandle) -> Result<(), String> {
+  toggle_quick_capture_window(&app).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn export_data_file(app: AppHandle, format: String, content: String) -> Result<String, String> {
+  let normalized = match format.trim() {
+    "json" => "json",
+    "csv" => "csv",
+    "markdown" | "md" => "md",
+    _ => return Err("导出格式不支持".to_string()),
+  };
+  let dir = export_dir(&app)?;
+  fs::create_dir_all(&dir).map_err(|err| format!("create export dir failed: {err}"))?;
+  let filename = format!("topdo-export-{}.{}", now_unix_seconds(), normalized);
+  let path = dir.join(filename);
+  fs::write(&path, content).map_err(|err| format!("write export file failed: {err}"))?;
+  Ok(path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn run_backup(app: AppHandle, content: String, retention_days: Option<i64>) -> Result<String, String> {
+  let dir = backup_dir(&app)?;
+  fs::create_dir_all(&dir).map_err(|err| format!("create backup dir failed: {err}"))?;
+  let today = chrono_like_date();
+  let path = dir.join(format!("topdo-backup-{today}.json"));
+  if !path.exists() {
+    fs::write(&path, content).map_err(|err| format!("write backup failed: {err}"))?;
+  }
+  let keep = retention_days.unwrap_or(7).max(1) as usize;
+  let mut backups: Vec<_> = fs::read_dir(&dir)
+    .map_err(|err| format!("read backup dir failed: {err}"))?
+    .filter_map(Result::ok)
+    .filter(|entry| entry.file_name().to_string_lossy().starts_with("topdo-backup-"))
+    .collect();
+  backups.sort_by_key(|entry| entry.file_name());
+  if backups.len() > keep {
+    let remove_count = backups.len().saturating_sub(keep);
+    for entry in backups.into_iter().take(remove_count) {
+      let _ = fs::remove_file(entry.path());
+    }
+  }
+  Ok(path.to_string_lossy().to_string())
+}
+
+fn chrono_like_date() -> String {
+  // Avoid adding a date crate: use local system date command on macOS and fall back to unix day.
+  if let Ok(output) = std::process::Command::new("date").arg("+%Y-%m-%d").output() {
+    if output.status.success() {
+      let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+      if !text.is_empty() {
+        return text;
+      }
+    }
+  }
+  let days = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .unwrap_or_default()
+    .as_secs()
+    / 86_400;
+  format!("day-{days}")
+}
+
+#[tauri::command]
+fn open_backup_folder(app: AppHandle) -> Result<(), String> {
+  let dir = backup_dir(&app)?;
+  fs::create_dir_all(&dir).map_err(|err| format!("create backup dir failed: {err}"))?;
+  #[cfg(target_os = "macos")]
+  {
+    std::process::Command::new("open")
+      .arg(&dir)
+      .spawn()
+      .map_err(|err| format!("open backup folder failed: {err}"))?;
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    let _ = dir;
+  }
+  Ok(())
+}
+
+#[tauri::command]
+fn open_export_folder(app: AppHandle) -> Result<(), String> {
+  let dir = export_dir(&app)?;
+  fs::create_dir_all(&dir).map_err(|err| format!("create export dir failed: {err}"))?;
+  #[cfg(target_os = "macos")]
+  {
+    std::process::Command::new("open")
+      .arg(&dir)
+      .spawn()
+      .map_err(|err| format!("open export folder failed: {err}"))?;
+  }
+  #[cfg(not(target_os = "macos"))]
+  {
+    let _ = dir;
+  }
+  Ok(())
 }
 
 #[tauri::command]
@@ -2716,6 +3414,66 @@ fn set_mode_shortcut_config(
 }
 
 #[tauri::command]
+fn get_system_settings(app: AppHandle) -> Result<SystemSettingsPayload, String> {
+  let cfg = load_app_config_from_file(&app)?;
+  Ok(SystemSettingsPayload {
+    menu_bar_enabled: cfg.system.menu_bar_enabled,
+    close_to_menu_bar: cfg.system.close_to_menu_bar,
+    hide_dock_icon: cfg.system.hide_dock_icon,
+    quick_capture_shortcut: cfg.shortcut.quick_capture,
+    quick_capture_notify: cfg.system.quick_capture_notify,
+    auto_backup: cfg.system.auto_backup,
+    backup_retention_days: cfg.system.backup_retention_days,
+  })
+}
+
+#[tauri::command]
+fn save_system_settings(
+  app: AppHandle,
+  menu_bar_enabled: bool,
+  close_to_menu_bar: bool,
+  hide_dock_icon: bool,
+  quick_capture_shortcut: String,
+  quick_capture_notify: bool,
+  auto_backup: bool,
+  backup_retention_days: i64,
+) -> Result<SystemSettingsPayload, String> {
+  let previous = {
+    let state = app.state::<Mutex<GlobalShortcutState>>();
+    let guard = state
+      .lock()
+      .map_err(|_| "failed to lock shortcut state".to_string())?;
+    (guard.quick_capture.clone(), guard.quick_capture_text.clone())
+  };
+  let (shortcut, label) = parse_shortcut_input(&quick_capture_shortcut)?;
+  register_quick_capture_shortcut(&app, shortcut, label.clone())?;
+
+  let mut cfg = load_app_config_from_file(&app)?;
+  cfg.system.menu_bar_enabled = menu_bar_enabled;
+  cfg.system.close_to_menu_bar = close_to_menu_bar;
+  cfg.system.hide_dock_icon = hide_dock_icon;
+  cfg.system.quick_capture_shortcut = label.clone();
+  cfg.system.quick_capture_notify = quick_capture_notify;
+  cfg.system.auto_backup = auto_backup;
+  cfg.system.backup_retention_days = if backup_retention_days <= 0 { 7 } else { backup_retention_days };
+  cfg.shortcut.quick_capture = label.clone();
+
+  if let Err(err) = save_app_config_to_file(&app, &cfg) {
+    if let Some(prev_shortcut) = previous.0 {
+      let rollback_label = if previous.1.trim().is_empty() {
+        format_shortcut(&prev_shortcut)
+      } else {
+        previous.1
+      };
+      let _ = register_quick_capture_shortcut(&app, prev_shortcut, rollback_label);
+    }
+    return Err(err);
+  }
+
+  get_system_settings(app)
+}
+
+#[tauri::command]
 fn set_window_mode(app: AppHandle, mode: String) -> Result<(), String> {
   set_window_mode_internal(&app, &mode)
 }
@@ -2896,7 +3654,7 @@ async fn reorder_local_tasks(app: AppHandle, ordered_ids: Vec<String>) -> Result
     for (idx, id) in ids.iter().enumerate() {
       tx.execute(
         "UPDATE tasks SET sort_order = ?1 WHERE id = ?2 AND source = 'local'",
-        params![idx as i64, id],
+        params![(ids.len() - idx) as i64, id],
       )
       .map_err(|err| format!("update sort_order failed: {err}"))?;
     }
@@ -3087,6 +3845,13 @@ async fn create_task(
     completed_at: String::new(),
     notes: String::new(),
     sort_order: 0,
+    sub_tasks: "[]".to_string(),
+    due_date: String::new(),
+    recurrence_rule: String::new(),
+    recurrence_parent_id: String::new(),
+    recurrence_index: None,
+    reminder_before: None,
+    reminder_notified: false,
     source: "feishu".to_string(),
     feishu_record_id: String::new(),
     sync_status: "pending".to_string(),
@@ -3218,6 +3983,7 @@ pub fn run() {
       None,
     ))
     .plugin(tauri_plugin_shell::init())
+    .plugin(tauri_plugin_notification::init())
     .manage(Mutex::new(UiState {
       mini_mode: false,
       always_on_top: true,
@@ -3227,6 +3993,7 @@ pub fn run() {
     .manage(tokio::sync::RwLock::new(TokenManager::default()))
     .manage(tokio::sync::Mutex::new(()))
     .setup(|app| {
+      create_system_windows(app)?;
       if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let pinned = app
           .state::<Mutex<UiState>>()
@@ -3243,6 +4010,19 @@ pub fn run() {
       }
       Ok(())
     })
+    .on_window_event(|window, event| {
+      if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if window.label() == MAIN_WINDOW_LABEL {
+          let should_hide = load_app_config_from_file(window.app_handle())
+            .map(|cfg| cfg.system.close_to_menu_bar)
+            .unwrap_or(true);
+          if should_hide {
+            api.prevent_close();
+            let _ = window.hide();
+          }
+        }
+      }
+    })
     .invoke_handler(tauri::generate_handler![
       check_feishu_api_client,
       get_window_state,
@@ -3251,12 +4031,20 @@ pub fn run() {
       enter_mini_mode,
       restore_normal_mode,
       hide_window_to_tray,
+      show_main_window,
+      show_quick_capture,
+      export_data_file,
+      run_backup,
+      open_backup_folder,
+      open_export_folder,
       save_config,
       load_config,
       get_shortcut_config,
       set_shortcut_config,
       get_mode_shortcut_config,
       set_mode_shortcut_config,
+      get_system_settings,
+      save_system_settings,
       set_window_mode,
       get_pet_settings,
       save_pet_settings,
@@ -3278,7 +4066,14 @@ pub fn run() {
       update_task,
       create_task,
       delete_task,
-      sync_tasks
+      sync_tasks,
+      get_habits,
+      get_habit_logs,
+      create_habit,
+      update_habit,
+      delete_habit,
+      check_in_habit,
+      uncheck_in_habit
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

@@ -16,13 +16,18 @@
     </div>
 
     <button type="button" class="add-btn" title="新建任务" @click="emit('add')">+</button>
+    <button type="button" class="stats-summary" @click="statsOpen = !statsOpen">
+      今日完成 {{ taskStore.todayCompletedCount }} 项 · 本周 {{ taskStore.weekCompletedCount }} 项 · 🔥连续 {{ taskStore.completionStreak }} 天
+    </button>
+    <StatsPanel v-if="statsOpen" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useTaskStore } from '../stores/taskStore';
 import type { TaskFilter } from '../stores/taskStore';
+import StatsPanel from './StatsPanel.vue';
 
 const taskStore = useTaskStore();
 
@@ -31,6 +36,7 @@ const totalCount = computed(() => taskStore.totalTaskCount);
 const pendingCount = computed(() => taskStore.pendingTaskCount);
 const inProgressCount = computed(() => taskStore.inProgressTaskCount);
 const doneCount = computed(() => taskStore.completedTaskCount);
+const statsOpen = ref(false);
 
 function setFilter(filter: TaskFilter) {
   taskStore.setFilter(filter);
@@ -43,8 +49,10 @@ const emit = defineEmits<{
 
 <style scoped>
 .stats-bar {
+  position: relative;
   padding: 1px 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -121,5 +129,22 @@ const emit = defineEmits<{
   background: color-mix(in srgb, var(--primary) 10%, var(--bg-solid));
   border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
   box-shadow: 0 1px 4px rgba(0, 122, 255, 0.14);
+}
+
+.stats-summary {
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stats-summary:hover {
+  background: color-mix(in srgb, var(--bg-hover) 45%, transparent);
+  color: var(--text-secondary);
 }
 </style>

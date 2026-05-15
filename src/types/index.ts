@@ -1,3 +1,19 @@
+export interface SubTask {
+  id: string;
+  text: string;
+  done: boolean;
+  created_at: string;
+}
+
+export interface RecurrenceRule {
+  type: 'daily' | 'weekly' | 'monthly' | 'weekdays' | 'custom';
+  interval: number;
+  daysOfWeek?: number[];
+  dayOfMonth?: number;
+  endDate?: string | null;
+  endCount?: number | null;
+}
+
 export interface Task {
   id?: string;
   record_id: string;
@@ -11,6 +27,13 @@ export interface Task {
   completed_at?: string;
   notes: string;
   sort_order?: number;
+  sub_tasks?: SubTask[];
+  due_date?: string;
+  recurrence_rule?: RecurrenceRule | null;
+  recurrence_parent_id?: string | null;
+  recurrence_index?: number | null;
+  reminder_before?: number | null;
+  reminder_notified?: boolean;
   source?: 'local' | 'feishu' | string;
   feishu_record_id?: string;
   sync_status: string;

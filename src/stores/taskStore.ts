@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia';
 import { invoke } from '@tauri-apps/api/core';
-import type { SyncTasksResult, Task } from '../types';
+import type { SubTask, SyncTasksResult, Task } from '../types';
 import { log } from '../utils/logger';
+import { generateRecurringInstances, parseRecurrenceRule } from '../utils/recurrence';
 
 export type AppMode = 'local' | 'feishu';
 export type SyncState = 'idle' | 'loading' | 'success' | 'error' | 'pending';
+type ReorderPlacement = 'before' | 'after' | 'end';
 export type TaskFilter = 'pending' | 'in_progress' | 'done' | 'all';
 export type TaskStatusGroup = 'in_progress' | 'pending' | 'completed';
 
@@ -43,6 +45,13 @@ interface CreateTaskInput {
   priority?: string;
   task_type?: string;
   status?: string;
+  notes?: string;
+  sub_tasks?: SubTask[];
+  due_date?: string;
+  recurrence_rule?: Task['recurrence_rule'];
+  recurrence_parent_id?: string;
+  recurrence_index?: number;
+  reminder_before?: number | null;
 }
 
 const FEISHU_RECORDS_URL = '/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records';
@@ -139,10 +148,41 @@ function findRefreshedTaskBySnapshot(tasks: Task[], snapshot: Task): Task | unde
   });
 }
 
+function normalizeSubTasks(value: unknown): SubTask[] {
+  const parsed = typeof value === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(value);
+        } catch {
+          return [];
+        }
+      })()
+    : value;
+
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((item) => item && typeof item === 'object')
+    .map((item: any) => ({
+      id: String(item.id || ''),
+      text: String(item.text || ''),
+      done: Boolean(item.done),
+      created_at: String(item.created_at || nowUnixSecondsString())
+    }))
+    .filter((item) => item.id && item.text.trim());
+}
+
 function normalizeTask(task: Task): Task {
   return {
     ...task,
-    priority: normalizePriority(task.priority || '普通')
+    priority: normalizePriority(task.priority || '普通'),
+    sort_order: Number(task.sort_order || 0),
+    sub_tasks: normalizeSubTasks((task as any).sub_tasks),
+    due_date: String((task as any).due_date || ''),
+    recurrence_rule: parseRecurrenceRule((task as any).recurrence_rule),
+    recurrence_parent_id: String((task as any).recurrence_parent_id || ''),
+    recurrence_index: (task as any).recurrence_index === null || (task as any).recurrence_index === undefined ? null : Number((task as any).recurrence_index),
+    reminder_before: (task as any).reminder_before === null || (task as any).reminder_before === undefined ? null : Number((task as any).reminder_before),
+    reminder_notified: Boolean((task as any).reminder_notified)
   };
 }
 
@@ -157,6 +197,26 @@ function timestampMs(raw: string): number {
   if (Number.isFinite(num)) return num > 1e12 ? num : num * 1000;
   const parsed = new Date(text).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function dayKey(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function dateKeyFromTimestamp(raw: string): string {
+  const ms = timestampMs(raw);
+  if (!ms) return '';
+  return dayKey(new Date(ms));
+}
+
+function startOfWeek(date: Date): Date {
+  const day = date.getDay() || 7;
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  start.setDate(start.getDate() - day + 1);
+  return start;
 }
 
 function statusRank(status: string): number {
@@ -181,6 +241,9 @@ function sortTasksByPolicy(tasks: Task[]): Task[] {
 
     const priorityDiff = priorityRank(a.priority) - priorityRank(b.priority);
     if (priorityDiff !== 0) return priorityDiff;
+
+    const orderDiff = Number(b.sort_order || 0) - Number(a.sort_order || 0);
+    if (orderDiff !== 0) return orderDiff;
 
     return timestampMs(b.created_at) - timestampMs(a.created_at);
   });
@@ -228,6 +291,63 @@ export const useTaskStore = defineStore('task', {
     completedCount: (state) => state.tasks.filter((task) => normalizeStatus(task.status) === 'completed').length,
     inProgressTasks: (state) => state.tasks.filter((task) => normalizeStatus(task.status) === 'in_progress'),
     hasActiveSearch: (state) => state.searchQuery.trim().length > 0,
+    todayCompletedCount: (state) => {
+      const today = dayKey(new Date());
+      return state.tasks.filter((task) => normalizeStatus(task.status) === 'completed' && dateKeyFromTimestamp(task.completed_at || '') === today).length;
+    },
+    weekCompletedCount: (state) => {
+      const start = startOfWeek(new Date()).getTime();
+      return state.tasks.filter((task) => {
+        if (normalizeStatus(task.status) !== 'completed') return false;
+        const completed = timestampMs(task.completed_at || '');
+        return completed >= start;
+      }).length;
+    },
+    weekCreatedTaskCount: (state) => {
+      const start = startOfWeek(new Date()).getTime();
+      return state.tasks.filter((task) => timestampMs(task.created_at || '') >= start).length;
+    },
+    weekCreatedCompletedCount: (state) => {
+      const start = startOfWeek(new Date()).getTime();
+      return state.tasks.filter((task) => {
+        const created = timestampMs(task.created_at || '');
+        return created >= start && normalizeStatus(task.status) === 'completed';
+      }).length;
+    },
+    completionStreak: (state) => {
+      const completedDays = new Set(
+        state.tasks
+          .filter((task) => normalizeStatus(task.status) === 'completed')
+          .map((task) => dateKeyFromTimestamp(task.completed_at || ''))
+          .filter(Boolean)
+      );
+      let streak = 0;
+      const cursor = new Date();
+      while (completedDays.has(dayKey(cursor))) {
+        streak += 1;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+      return streak;
+    },
+    recentCompletionStats: (state) => {
+      const counts = new Map<string, number>();
+      for (const task of state.tasks) {
+        if (normalizeStatus(task.status) !== 'completed') continue;
+        const key = dateKeyFromTimestamp(task.completed_at || '');
+        if (!key) continue;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+      return Array.from({ length: 7 }, (_, index) => {
+        const date = new Date();
+        date.setDate(date.getDate() - (6 - index));
+        const key = dayKey(date);
+        return {
+          date: key,
+          label: index === 6 ? '今天' : `${date.getMonth() + 1}/${date.getDate()}`,
+          count: counts.get(key) || 0
+        };
+      });
+    },
     filteredTasks: (state) => {
       const sorted = sortTasksByPolicy(state.tasks);
       const searched = applySearchFilter(sorted, state.searchQuery);
@@ -329,6 +449,145 @@ export const useTaskStore = defineStore('task', {
         merged.priority = normalizePriority(patch.priority);
       }
       this.tasks[index] = merged;
+    },
+
+    async updateTaskLocalFields(recordId: string, patch: Partial<Task>, fields: Record<string, string>) {
+      const target = findTaskByRecordId(this.tasks, recordId);
+      if (!target) throw new Error('任务不存在');
+
+      const previous = { ...target };
+      this.setTaskPatch(recordId, patch);
+
+      try {
+        const updated = await invoke<Task>('update_local_task', {
+          id: target.id || target.record_id,
+          fields
+        });
+        this.setTaskPatch(recordId, normalizeTask(updated));
+      } catch (error) {
+        this.setTaskPatch(recordId, previous);
+        throw error;
+      }
+    },
+
+    async updateTaskSubTasks(recordId: string, subTasks: SubTask[]) {
+      const normalized = normalizeSubTasks(subTasks);
+      await this.updateTaskLocalFields(
+        recordId,
+        { sub_tasks: normalized },
+        { sub_tasks: JSON.stringify(normalized) }
+      );
+    },
+
+    async updateTaskDueDate(recordId: string, dueDate: string) {
+      const next = dueDate.trim();
+      await this.updateTaskLocalFields(recordId, { due_date: next }, { due_date: next });
+    },
+
+    async updateTaskRecurrence(recordId: string, rule: Task['recurrence_rule']) {
+      const serialized = rule ? JSON.stringify(rule) : '';
+      await this.updateTaskLocalFields(recordId, { recurrence_rule: rule || null }, { recurrence_rule: serialized });
+    },
+
+    async updateTaskReminder(recordId: string, reminderBefore: number | null) {
+      await this.updateTaskLocalFields(
+        recordId,
+        { reminder_before: reminderBefore, reminder_notified: false },
+        {
+          reminder_before: reminderBefore === null ? '' : String(reminderBefore),
+          reminder_notified: '0'
+        }
+      );
+    },
+
+    async markTaskReminderNotified(recordId: string) {
+      await this.updateTaskLocalFields(recordId, { reminder_notified: true }, { reminder_notified: '1' });
+    },
+
+    async initRecurringTasks() {
+      const instances = generateRecurringInstances(this.tasks);
+      for (const instance of instances) {
+        await this.createTask({
+          name: instance.name,
+          priority: instance.priority,
+          status: instance.status,
+          due_date: instance.due_date,
+          recurrence_parent_id: instance.recurrence_parent_id,
+          recurrence_index: instance.recurrence_index,
+          reminder_before: instance.reminder_before
+        });
+      }
+    },
+
+    startDailyRecurrenceCheck() {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+      window.setTimeout(() => {
+        void this.initRecurringTasks();
+        window.setInterval(() => void this.initRecurringTasks(), 24 * 60 * 60 * 1000);
+      }, nextMidnight - now.getTime());
+    },
+
+    async reorderTask(recordId: string, targetPriority: string, targetRecordId = '', placement: ReorderPlacement = 'before') {
+      const target = findTaskByRecordId(this.tasks, recordId);
+      if (!target || normalizeStatus(target.status) === 'completed') return;
+
+      const priority = normalizePriority(targetPriority || target.priority || '普通');
+      const status = normalizeStatus(target.status);
+      const previousTasks = [...this.tasks];
+      const baseOrder = Date.now();
+      const group = sortTasksByPolicy(this.tasks)
+        .filter((task) => normalizeStatus(task.status) === status)
+        .filter((task) => normalizePriority(task.priority || '普通') === priority)
+        .filter((task) => task.record_id !== recordId && task.id !== recordId);
+
+      const targetIndex = targetRecordId
+        ? group.findIndex((task) => task.record_id === targetRecordId || task.id === targetRecordId)
+        : -1;
+      const insertIndex = targetRecordId && targetIndex >= 0
+        ? targetIndex + (placement === 'after' ? 1 : 0)
+        : group.length;
+      group.splice(insertIndex, 0, { ...target, priority });
+
+      const updates = group.map((task, index) => ({
+        recordId: task.record_id,
+        id: task.id || task.record_id,
+        sort_order: baseOrder - index,
+        priority: task.record_id === target.record_id || task.id === target.id ? priority : normalizePriority(task.priority || '普通')
+      }));
+
+      for (const update of updates) {
+        const patch: Partial<Task> = {
+          priority: update.priority,
+          sort_order: update.sort_order
+        };
+        if (update.recordId === recordId && this.mode === 'feishu' && update.priority !== normalizePriority(target.priority || '普通')) {
+          patch.sync_status = 'pending';
+        }
+        this.setTaskPatch(update.recordId, patch);
+      }
+      this.tasks = sortTasksByPolicy(this.tasks);
+
+      try {
+        if (priority !== normalizePriority(target.priority || '普通')) {
+          await this.updateTaskPriority(recordId, priority);
+        }
+        await Promise.all(
+          updates.map((update) =>
+            invoke<Task>('update_local_task', {
+              id: update.id,
+              fields: { sort_order: String(update.sort_order) }
+            })
+          )
+        );
+        for (const update of updates) {
+          this.setTaskPatch(update.recordId, { sort_order: update.sort_order });
+        }
+        this.tasks = sortTasksByPolicy(this.tasks);
+      } catch (error) {
+        this.tasks = previousTasks;
+        throw error;
+      }
     },
 
     moveTaskToStatusTail(recordId: string, nextStatus: string) {
@@ -821,6 +1080,13 @@ export const useTaskStore = defineStore('task', {
           ? (taskInput.task_type || '日常事务').trim() || '日常事务'
           : '';
       const normalizedStatus = (taskInput.status || '待处理').trim() || '待处理';
+      const dueDate = (taskInput.due_date || '').trim();
+      const notes = (taskInput.notes || '').trim();
+      const subTasks = normalizeSubTasks(taskInput.sub_tasks || []);
+      const recurrenceRule = taskInput.recurrence_rule || null;
+      const recurrenceParentId = (taskInput.recurrence_parent_id || '').trim();
+      const recurrenceIndex = taskInput.recurrence_index ?? null;
+      const reminderBefore = taskInput.reminder_before ?? null;
 
       if (this.mode === 'local') {
         let created: Task;
@@ -838,7 +1104,44 @@ export const useTaskStore = defineStore('task', {
           });
           log('API', '本地创建参数兼容重试成功', { error: String(firstError) });
         }
-        this.tasks.unshift(normalizeTask(created));
+        const normalizedCreated = normalizeTask(created);
+        this.tasks.unshift(normalizedCreated);
+        if (dueDate) {
+          await this.updateTaskDueDate(normalizedCreated.record_id, dueDate);
+        }
+        if (notes || subTasks.length) {
+          await this.updateTaskLocalFields(
+            normalizedCreated.record_id,
+            {
+              notes,
+              sub_tasks: subTasks
+            },
+            {
+              notes,
+              sub_tasks: JSON.stringify(subTasks)
+            }
+          );
+        }
+        if (recurrenceRule) {
+          await this.updateTaskRecurrence(normalizedCreated.record_id, recurrenceRule);
+        }
+        if (recurrenceParentId || recurrenceIndex || reminderBefore !== null) {
+          await this.updateTaskLocalFields(
+            normalizedCreated.record_id,
+            {
+              recurrence_parent_id: recurrenceParentId,
+              recurrence_index: recurrenceIndex,
+              reminder_before: reminderBefore,
+              reminder_notified: false
+            },
+            {
+              recurrence_parent_id: recurrenceParentId,
+              recurrence_index: recurrenceIndex === null ? '' : String(recurrenceIndex),
+              reminder_before: reminderBefore === null ? '' : String(reminderBefore),
+              reminder_notified: '0'
+            }
+          );
+        }
         return created.record_id;
       }
 
@@ -856,6 +1159,13 @@ export const useTaskStore = defineStore('task', {
         completed_at: '',
         notes: '',
         sort_order: 0,
+        sub_tasks: subTasks,
+        due_date: dueDate,
+        recurrence_rule: recurrenceRule,
+        recurrence_parent_id: recurrenceParentId,
+        recurrence_index: recurrenceIndex,
+        reminder_before: reminderBefore,
+        reminder_notified: false,
         source: 'feishu',
         feishu_record_id: '',
         sync_status: 'pending',
@@ -910,6 +1220,32 @@ export const useTaskStore = defineStore('task', {
         // - 成功时可拉取到其他端更新
         // - 失败时可自动重试把 pending 任务推到飞书
         this.scheduleSyncAfterWrite();
+        if (dueDate) {
+          await this.updateTaskDueDate(result.record_id, dueDate);
+        }
+        if (notes || subTasks.length || recurrenceRule || recurrenceParentId || recurrenceIndex || reminderBefore !== null) {
+          await this.updateTaskLocalFields(
+            result.record_id,
+            {
+              notes,
+              sub_tasks: subTasks,
+              recurrence_rule: recurrenceRule,
+              recurrence_parent_id: recurrenceParentId,
+              recurrence_index: recurrenceIndex,
+              reminder_before: reminderBefore,
+              reminder_notified: false
+            },
+            {
+              notes,
+              sub_tasks: JSON.stringify(subTasks),
+              recurrence_rule: recurrenceRule ? JSON.stringify(recurrenceRule) : '',
+              recurrence_parent_id: recurrenceParentId,
+              recurrence_index: recurrenceIndex === null ? '' : String(recurrenceIndex),
+              reminder_before: reminderBefore === null ? '' : String(reminderBefore),
+              reminder_notified: '0'
+            }
+          );
+        }
 
         return result.record_id;
       } catch (error) {

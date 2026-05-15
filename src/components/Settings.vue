@@ -1,305 +1,327 @@
 <template>
-  <section class="task-scrollbar flex h-full min-h-0 flex-col overflow-y-auto bg-[color:var(--bg-secondary)] p-4 text-[color:var(--text-primary)]">
-    <h2 class="text-lg font-semibold">设置</h2>
-
-    <div class="mt-4 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">运行模式</h3>
-      <div class="mt-3 space-y-2 text-sm">
-        <label class="flex items-start gap-2">
-          <input v-model="selectedMode" type="radio" value="local" class="mt-1" />
-          <span>本地模式 — 数据存本地</span>
-        </label>
-        <label class="flex items-start gap-2">
-          <input v-model="selectedMode" type="radio" value="feishu" class="mt-1" />
-          <span>飞书同步 — 连接多维表格</span>
-        </label>
+  <section class="settings-page task-scrollbar">
+    <header class="settings-header">
+      <div>
+        <h2>设置</h2>
       </div>
-      <p class="mt-2 text-[11px] text-[color:var(--text-tertiary)]">⚠ 切换模式不会删除已有数据</p>
-    </div>
+      <button type="button" class="ghost-btn" @click="$emit('back')">返回任务</button>
+    </header>
 
-    <div class="mt-3 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">全局唤起快捷键</h3>
-      <p class="mt-1 text-[11px] text-[color:var(--text-secondary)]">
-        用于显示/隐藏 Topdo 窗口。示例：
-        <code class="rounded bg-[color:var(--bg-secondary)] px-1">Cmd+Shift+T</code>、
-        <code class="rounded bg-[color:var(--bg-secondary)] px-1">Cmd+Alt+T</code>
-      </p>
-      <div class="mt-2 flex items-center gap-2">
-        <input
-          v-model="shortcutDraft"
-          type="text"
-          class="flex-1 rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-          placeholder="Cmd+Shift+T"
-        />
-        <button type="button" class="action-btn px-3 py-2" :disabled="busy" @click="onSaveShortcut">保存快捷键</button>
-      </div>
-      <p v-if="appliedShortcut" class="mt-2 text-[11px] text-[color:var(--text-tertiary)]">
-        当前生效：<span class="font-medium text-[color:var(--text-secondary)]">{{ appliedShortcut }}</span>
-      </p>
-    </div>
-
-    <div class="mt-3 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">形态切换快捷键（2.0）</h3>
-      <p class="mt-1 text-[11px] text-[color:var(--text-secondary)]">
-        用于在「面板态 / 猫咪态」间切换。默认：
-        <code class="rounded bg-[color:var(--bg-secondary)] px-1">Alt+T</code>
-      </p>
-      <div class="mt-2 flex items-center gap-2">
-        <input
-          v-model="modeShortcutDraft"
-          type="text"
-          class="flex-1 rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-          placeholder="Alt+T"
-        />
-        <button type="button" class="action-btn px-3 py-2" :disabled="busy" @click="onSaveModeShortcut">保存快捷键</button>
-      </div>
-      <p v-if="appliedModeShortcut" class="mt-2 text-[11px] text-[color:var(--text-tertiary)]">
-        当前生效：<span class="font-medium text-[color:var(--text-secondary)]">{{ appliedModeShortcut }}</span>
-      </p>
-    </div>
-
-    <div class="mt-3 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">宠物模式（2.0）</h3>
-      <div class="mt-3 space-y-2 text-sm">
-        <label class="flex items-center gap-2">
-          <input v-model="petEnabled" type="checkbox" />
-          <span>启用宠物模式</span>
-        </label>
-        <label class="flex items-center gap-2">
-          <input v-model="petShowBadge" type="checkbox" :disabled="!petEnabled" />
-          <span>显示角标（未完成数量）</span>
-        </label>
-        <label class="flex items-center gap-2">
-          <input v-model="petAnimations" type="checkbox" :disabled="!petEnabled" />
-          <span>启用动画效果</span>
-        </label>
-      </div>
-    </div>
-
-    <div class="mt-3 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">外观</h3>
-      <div class="mt-3 space-y-2 text-sm">
-        <label class="flex items-start gap-2">
-          <input v-model="themePreferenceValue" type="radio" value="system" class="mt-1" />
-          <span>跟随系统</span>
-        </label>
-        <label class="flex items-start gap-2">
-          <input v-model="themePreferenceValue" type="radio" value="light" class="mt-1" />
-          <span>浅色模式</span>
-        </label>
-        <label class="flex items-start gap-2">
-          <input v-model="themePreferenceValue" type="radio" value="dark" class="mt-1" />
-          <span>深色模式</span>
-        </label>
-      </div>
-      <p class="mt-2 text-[11px] text-[color:var(--text-tertiary)]">当前生效：{{ resolvedThemeLabel }}</p>
-    </div>
-
-    <div class="mt-3 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <div class="flex items-center justify-between">
+    <section class="settings-group padded-group">
+      <SegmentedControl
+        v-model="selectedMode"
+        :options="[
+          { value: 'local', label: '本地模式', icon: 'cloud-off' },
+          { value: 'feishu', label: '飞书同步', icon: 'cloud-sync' }
+        ]"
+      />
+      <div v-if="selectedMode === 'feishu'" class="sync-status" :class="{ error: !feishuConfigured }">
+        <span class="sync-dot" />
         <div>
-          <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">开机自动启动</h3>
-          <p class="mt-1 text-[11px] text-[color:var(--text-secondary)]">登录 macOS 后自动启动 Topdo</p>
+          <p>{{ feishuConfigured ? '飞书同步已配置' : '飞书同步未完成配置' }}</p>
+          <span>{{ feishuConfigured ? '可测试连接并保存配置' : '请补充多维表格和应用凭证' }}</span>
         </div>
-        <label class="inline-flex cursor-pointer items-center">
-          <input v-model="autostartEnabled" type="checkbox" class="peer sr-only" :disabled="busy || autostartLoading" />
-          <span
-            class="relative h-6 w-11 rounded-full bg-[color:var(--bg-tertiary)] transition-colors after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-[color:var(--bg-solid)] after:transition-all after:content-[''] peer-checked:bg-[color:var(--primary)] peer-checked:after:translate-x-5"
-          />
-        </label>
       </div>
-    </div>
+    </section>
 
     <template v-if="selectedMode === 'feishu'">
-      <div class="mt-4 space-y-4 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-        <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">飞书同步设置</h3>
-
-        <div class="rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-          <div class="flex items-center justify-between">
-            <h4 class="text-sm font-semibold text-[color:var(--text-primary)]">Step ① 创建任务表格</h4>
-            <span v-if="stepState.templateReady" class="text-xs font-semibold text-[color:var(--status-done)]">✅ 已完成</span>
+      <section class="settings-group">
+        <div class="setting-row clickable" @click="bitableExpanded = !bitableExpanded">
+          <span class="setting-icon blue"><Icon name="link" :size="18" /></span>
+          <div class="setting-text">
+            <p class="setting-name">多维表格</p>
           </div>
-          <p class="mt-2 text-xs text-[color:var(--text-secondary)]">如果你还没有多维表格，可直接打开 Topdo 模板链接并创建自己的文档。</p>
-          <button
-            type="button"
-            class="mt-3 rounded-[8px] border border-[color:var(--primary)] bg-[color:var(--bg-solid)] px-3 py-1.5 text-xs font-medium text-[color:var(--primary)] transition-colors hover:bg-[color:var(--primary-light)]"
-            @click="onOpenTemplateLink"
-          >
-            🔗 打开 Topdo 模板
-          </button>
-          <p class="mt-2 text-xs text-[color:var(--text-secondary)]">已有表格？可直接进入下一步。</p>
+          <Icon class="setting-arrow" :class="{ open: bitableExpanded }" name="chevron-right" :size="17" />
         </div>
-
-        <div class="rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-          <div class="flex items-center justify-between">
-            <h4 class="text-sm font-semibold text-[color:var(--text-primary)]">Step ② 粘贴表格链接</h4>
-            <span v-if="stepState.linkParsed" class="text-xs font-semibold text-[color:var(--status-done)]">✅ 已完成</span>
-          </div>
-          <div class="mt-2 flex gap-2">
-            <input
-              v-model="form.bitableUrl"
-              type="text"
-              class="flex-1 rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-              placeholder="https://xxx.larkoffice.com/base/..."
-              @blur="parseBitableUrl(true)"
-            />
-            <button
-              type="button"
-              class="rounded-[8px] border border-[color:var(--primary)] px-3 py-2 text-xs font-medium text-[color:var(--primary)] transition-colors hover:bg-[color:var(--primary-light)]"
-              @click="parseBitableUrl(false)"
-            >
-              解析
-            </button>
-          </div>
-          <p class="mt-2 text-xs" :class="stepState.linkParsed ? 'text-[color:var(--status-done)]' : 'text-[color:var(--text-secondary)]'">
-            {{ stepState.linkParsed ? '✅ 已识别 App Token 和 Table ID' : '自动提取 base 后的 App Token 和 table 参数' }}
-          </p>
-
-          <div class="mt-3 space-y-3">
-            <label class="block">
-              <span class="mb-1 block text-sm text-[color:var(--text-secondary)]">App Token</span>
-              <input
-                v-model="form.appToken"
-                type="text"
-                class="w-full rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-                placeholder="请输入 App Token"
-              />
-              <p class="mt-1 text-xs text-[color:var(--text-secondary)]">从多维表格 URL 中 /base/ 后的标识</p>
-            </label>
-
-            <label class="block">
-              <span class="mb-1 block text-sm text-[color:var(--text-secondary)]">Table ID</span>
-              <input
-                v-model="form.tableId"
-                type="text"
-                class="w-full rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-                placeholder="请输入 Table ID"
-              />
-              <p class="mt-1 text-xs text-[color:var(--text-secondary)]">从多维表格 URL 中 table= 后的部分</p>
-            </label>
-          </div>
-        </div>
-
-        <div class="rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-          <div class="flex items-center justify-between">
-            <h4 class="text-sm font-semibold text-[color:var(--text-primary)]">Step ③ 填写应用凭证</h4>
-            <span v-if="stepState.credentialReady" class="text-xs font-semibold text-[color:var(--status-done)]">✅ 已完成</span>
-          </div>
-
-          <div class="mt-3 space-y-3">
-            <label class="block">
-              <span class="mb-1 block text-sm text-[color:var(--text-secondary)]">App ID</span>
-              <input
-                v-model="form.appId"
-                type="text"
-                class="w-full rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-                placeholder="请输入 App ID（如 cli_xxx）"
-              />
-            </label>
-
-            <label class="block">
-              <span class="mb-1 block text-sm text-[color:var(--text-secondary)]">App Secret</span>
-              <input
-                v-model="form.appSecret"
-                type="password"
-                class="w-full rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-3 py-2 text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-tertiary)] focus:border-[color:var(--primary)] focus:ring-2 focus:ring-[color:var(--primary-light)]"
-                placeholder="留空表示保留已配置的 Secret"
-              />
-            </label>
-          </div>
-
-          <div class="mt-3 rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-secondary)] px-3 py-2 text-[12px] text-[color:var(--text-secondary)]">
-            <p class="font-medium text-[color:var(--text-secondary)]">💡 在飞书开放平台创建企业自建应用，即可获取 App ID 和 App Secret</p>
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                class="rounded-[6px] border border-[color:var(--primary)] bg-[color:var(--bg-solid)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--primary)] transition-colors hover:bg-[color:var(--primary-light)]"
-                @click="onOpenTutorialLink"
-              >
-                📖 打开教程
-              </button>
-              <span v-if="stepState.tutorialCopied" class="text-[11px] font-semibold text-[color:var(--status-done)]">
-                ✅ 已在浏览器打开
-              </span>
+        <Transition name="expand">
+          <div v-if="bitableExpanded" class="expand-section">
+            <div class="expand-inner">
+              <div class="expand-title"><span class="step">1</span> 粘贴并解析多维表格链接</div>
+              <label class="form-group">
+                <span class="form-label">多维表格链接</span>
+                <div class="form-row">
+                  <input
+                    v-model="form.bitableUrl"
+                    type="text"
+                    class="form-input"
+                    placeholder="https://xxx.feishu.cn/base/..."
+                    @blur="parseBitableUrl(true)"
+                  />
+                  <button type="button" class="btn secondary compact" @click="parseBitableUrl(false)">解析</button>
+                </div>
+                <span class="form-hint">自动提取 base 后的 App Token 和 table 参数。</span>
+              </label>
+              <div class="form-row two-col">
+                <label class="form-group">
+                  <span class="form-label">App Token</span>
+                  <input v-model="form.appToken" type="text" class="form-input mono" placeholder="Base Token" />
+                </label>
+                <label class="form-group">
+                  <span class="form-label">Table ID</span>
+                  <input v-model="form.tableId" type="text" class="form-input mono" placeholder="tbl..." />
+                </label>
+              </div>
+              <div v-if="stepState.linkParsed" class="parse-result">
+                <Icon name="check-circle" :size="15" /> 已识别 App Token 和 Table ID
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn secondary" @click="onOpenTemplateLink">打开模板</button>
+                <button type="button" class="btn ghost" @click="onCancelBitableEdit">取消</button>
+                <button type="button" class="btn primary" :disabled="busy" @click="onSaveSection('bitable')">保存并收起</button>
+              </div>
             </div>
-            <p class="mt-2 text-[11px] text-[color:var(--text-secondary)]">点击按钮后会直接用默认浏览器打开教程。</p>
           </div>
+        </Transition>
+
+        <div class="setting-row clickable" @click="credentialExpanded = !credentialExpanded">
+          <span class="setting-icon blue"><Icon name="key" :size="18" /></span>
+          <div class="setting-text">
+            <p class="setting-name">应用凭证</p>
+          </div>
+          <span v-if="hasSavedSecret" class="encrypted-badge"><Icon name="lock" :size="12" /> 已加密</span>
+          <Icon class="setting-arrow" :class="{ open: credentialExpanded }" name="chevron-right" :size="17" />
         </div>
-      </div>
+        <Transition name="expand">
+          <div v-if="credentialExpanded" class="expand-section">
+            <div class="expand-inner">
+              <div class="expand-title"><span class="step">2</span> 填写应用凭证</div>
+              <label class="form-group">
+                <span class="form-label">App ID</span>
+                <input v-model="form.appId" type="text" class="form-input mono" placeholder="cli_xxx" />
+              </label>
+              <label class="form-group">
+                <span class="form-label">App Secret</span>
+                <input v-model="form.appSecret" type="password" class="form-input mono" placeholder="留空表示保留已保存的 Secret" />
+                <span class="form-hint">Secret 保存后由本地配置管理，不在页面明文展示。</span>
+              </label>
+              <div class="annotation">
+                <Icon name="info" :size="15" />
+                <span>在飞书开放平台创建企业自建应用，即可获取 App ID 和 App Secret。</span>
+                <button type="button" class="text-link" @click="onOpenTutorialLink">打开教程</button>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn secondary" :disabled="busy" @click="onTestConnection">测试连接</button>
+                <button type="button" class="btn ghost" @click="onCancelCredentialEdit">取消</button>
+                <button type="button" class="btn primary" :disabled="busy" @click="onSaveSection('credential')">保存并收起</button>
+              </div>
+            </div>
+          </div>
+        </Transition>
+
+        <div class="action-row">
+          <button type="button" class="btn secondary" :disabled="busy" @click="onTestConnection">测试连接</button>
+          <button type="button" class="btn secondary" @click="onOpenTemplateLink">打开模板</button>
+          <button type="button" class="btn secondary" @click="showLogs = !showLogs">{{ showLogs ? '隐藏日志' : '查看日志' }}</button>
+        </div>
+      </section>
     </template>
 
-    <div class="mt-4 rounded-[10px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-3">
-      <h3 class="text-sm font-semibold text-[color:var(--text-primary)]">关于 / 反馈</h3>
-      <p class="mt-1 text-[11px] text-[color:var(--text-secondary)]">遇到问题或想提建议，可直接打开 GitHub 查看项目或提交反馈。</p>
-      <div class="mt-3 grid grid-cols-2 gap-2">
-        <button type="button" class="action-btn px-3 py-2" @click="onOpenGitHub">GitHub 主页</button>
-        <button type="button" class="action-btn px-3 py-2" @click="onOpenFeedback">反馈地址</button>
+    <section class="settings-group">
+      <div class="setting-row editable-row">
+        <span class="setting-icon blue"><Icon name="keyboard" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">唤起 / 隐藏窗口</p>
+        </div>
+        <KbdShortcut :value="appliedShortcut" />
       </div>
-    </div>
+      <div class="shortcut-editor">
+        <input v-model="shortcutDraft" type="text" class="form-input" placeholder="Cmd+Shift+T" />
+        <button type="button" class="btn secondary compact" :disabled="busy" @click="onSaveShortcut">保存</button>
+      </div>
+      <div class="setting-row editable-row">
+        <span class="setting-icon blue"><Icon name="cat" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">面板 / 迷你模式切换</p>
+        </div>
+        <KbdShortcut :value="appliedModeShortcut" />
+      </div>
+      <div class="shortcut-editor">
+        <input v-model="modeShortcutDraft" type="text" class="form-input" placeholder="Alt+T" />
+        <button type="button" class="btn secondary compact" :disabled="busy" @click="onSaveModeShortcut">保存</button>
+      </div>
+    </section>
 
-    <p
-      v-if="statusMessage"
-      class="mt-4 rounded-[8px] px-3 py-2 text-sm"
-      :class="
-        statusType === 'success'
-          ? 'bg-[color:var(--primary-light)] text-[color:var(--status-done)]'
-          : 'bg-[color:var(--bg-tertiary)] text-[color:var(--priority-high)]'
-      "
-    >
+    <section class="settings-group">
+      <div class="setting-row">
+        <span class="setting-icon green"><Icon name="habit-mode" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">习惯模块</p>
+        </div>
+        <label class="toggle"><input v-model="habitModuleEnabledModel" type="checkbox" /><span /></label>
+      </div>
+      <div class="setting-row">
+        <span class="setting-icon orange"><Icon name="bell" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">截止提醒</p>
+        </div>
+        <label class="toggle"><input v-model="reminderEnabledModel" type="checkbox" /><span /></label>
+      </div>
+      <div class="setting-row">
+        <span class="setting-icon green"><Icon name="cat" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">宠物模式</p>
+        </div>
+        <label class="toggle"><input v-model="petEnabled" type="checkbox" /><span /></label>
+      </div>
+      <div v-if="petEnabled" class="nested-options">
+        <label><input v-model="petShowBadge" type="checkbox" /> 显示角标（未完成数量）</label>
+        <label><input v-model="petAnimations" type="checkbox" /> 启用动画效果</label>
+      </div>
+    </section>
+
+    <section class="settings-group padded-group">
+      <SegmentedControl
+        v-model="themePreferenceValue"
+        :options="[
+          { value: 'system', label: '跟随系统', icon: 'monitor' },
+          { value: 'light', label: '浅色', icon: 'sun' },
+          { value: 'dark', label: '深色', icon: 'moon' }
+        ]"
+      />
+    </section>
+
+    <section class="settings-group">
+      <div class="setting-row">
+        <span class="setting-icon orange"><Icon name="rocket" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">开机自启动</p>
+        </div>
+        <label class="toggle"><input v-model="autostartEnabled" type="checkbox" :disabled="busy || autostartLoading" /><span /></label>
+      </div>
+      <div class="setting-row">
+        <span class="setting-icon gray"><Icon name="update" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">自动检查更新</p>
+        </div>
+        <label class="toggle"><input v-model="autoUpdateEnabledModel" type="checkbox" /><span /></label>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <div class="setting-row editable-row">
+        <span class="setting-icon orange"><Icon name="keyboard" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">快捷新建任务</p>
+        </div>
+        <KbdShortcut :value="quickCaptureShortcutDraft" />
+      </div>
+      <div class="shortcut-editor">
+        <input v-model="quickCaptureShortcutDraft" type="text" class="form-input" placeholder="Alt+Space" />
+        <button type="button" class="btn secondary compact" :disabled="busy" @click="onSaveSystemSettings">保存</button>
+      </div>
+      <div class="setting-row">
+        <span class="setting-icon green"><Icon name="bell" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">快速捕获后通知</p>
+        </div>
+        <button type="button" class="btn ghost compact" :disabled="busy" @click="onSendTestNotification">测试</button>
+        <label class="toggle"><input v-model="quickCaptureNotify" type="checkbox" /><span /></label>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <div class="setting-row">
+        <span class="setting-icon green"><Icon name="download" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">数据导出</p>
+        </div>
+      </div>
+      <div class="action-row wrap">
+        <button type="button" class="btn secondary" :disabled="busy" @click="onExportData('json')">导出 JSON</button>
+        <button type="button" class="btn secondary" :disabled="busy" @click="onExportData('csv')">导出 CSV</button>
+        <button type="button" class="btn secondary" :disabled="busy" @click="onExportData('markdown')">导出 Markdown</button>
+      </div>
+      <p v-if="dataActionMessage" class="inline-result" :class="dataActionType">{{ dataActionMessage }}</p>
+      <div class="setting-row">
+        <span class="setting-icon orange"><Icon name="update" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">自动本地备份</p>
+        </div>
+        <label class="toggle"><input v-model="autoBackup" type="checkbox" /><span /></label>
+      </div>
+      <div class="backup-editor">
+        <label class="backup-retention">
+          <span>保留天数</span>
+          <input v-model.number="backupRetentionDays" min="1" max="90" type="number" class="form-input" />
+        </label>
+        <button type="button" class="btn secondary compact" :disabled="busy" @click="onRunBackupNow">立即备份</button>
+        <button type="button" class="btn ghost compact" :disabled="busy" @click="onOpenBackupFolder">打开文件夹</button>
+      </div>
+    </section>
+
+    <section class="settings-group">
+      <div class="setting-row">
+        <span class="setting-icon gray"><Icon name="info" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">Topdo</p>
+        </div>
+      </div>
+      <button type="button" class="setting-row clickable full-row-button" @click="onOpenGitHub">
+        <span class="setting-icon gray"><Icon name="github" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">GitHub 主页</p>
+        </div>
+        <Icon name="chevron-right" :size="17" />
+      </button>
+      <button type="button" class="setting-row clickable full-row-button" @click="onOpenFeedback">
+        <span class="setting-icon blue"><Icon name="chat" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">反馈建议</p>
+        </div>
+        <Icon name="chevron-right" :size="17" />
+      </button>
+    </section>
+
+    <p v-if="statusMessage" class="status-message" :class="statusType">
       {{ statusMessage }}
     </p>
-    <div
-      v-if="statusType === 'error' && statusDetail"
-      class="task-scrollbar mt-2 max-h-36 rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-2"
-    >
-      <div class="mb-2 flex items-center justify-end">
-        <button type="button" class="action-btn px-2 py-1 text-[11px]" @click="onCopyErrorDetail">复制错误详情</button>
-        <span v-if="errorDetailCopied" class="ml-2 text-[11px] text-[color:var(--status-done)]">已复制</span>
+    <div v-if="statusType === 'error' && statusDetail" class="error-detail">
+      <div class="error-actions">
+        <button type="button" class="btn secondary compact" @click="onCopyErrorDetail">复制错误详情</button>
+        <span v-if="errorDetailCopied">已复制</span>
       </div>
-      <pre class="whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-[color:var(--text-secondary)]">{{ statusDetail }}</pre>
+      <pre>{{ statusDetail }}</pre>
     </div>
 
-    <div class="mt-4 grid grid-cols-3 gap-2">
-      <button type="button" class="action-btn" :disabled="busy || selectedMode !== 'feishu'" @click="onTestConnection">
-        测试连接
-      </button>
-      <button type="button" class="action-btn" :disabled="busy" @click="onSave">保存</button>
-      <button type="button" class="action-btn" :disabled="busy" @click="$emit('back')">返回</button>
+    <div class="footer-actions">
+      <button type="button" class="btn secondary" :disabled="busy || selectedMode !== 'feishu'" @click="onTestConnection">测试连接</button>
+      <button type="button" class="btn primary" :disabled="busy" @click="onSave">保存设置</button>
+      <button type="button" class="btn ghost" :disabled="busy" @click="$emit('back')">返回</button>
     </div>
 
-    <div class="mt-3 flex items-center justify-between">
-      <button type="button" class="action-btn px-3 py-2" @click="showLogs = !showLogs">
-        {{ showLogs ? '隐藏日志' : '查看日志' }}
-      </button>
-      <span class="text-[11px] text-[color:var(--text-tertiary)]">最近 {{ logs.length }} / 50 条</span>
-    </div>
-
-    <div v-if="showLogs" class="mt-3 rounded-[8px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] p-2">
-      <div class="mb-2 flex items-center justify-end gap-2">
-        <button type="button" class="action-btn px-2 py-1 text-[11px]" @click="onClearLogs">清除日志</button>
-        <button type="button" class="action-btn px-2 py-1 text-[11px]" @click="onCopyLogs">复制全部</button>
+    <Transition name="expand">
+      <div v-if="showLogs" class="logs-panel">
+        <div class="logs-header">
+          <span>最近 {{ logs.length }} / 50 条</span>
+          <div>
+            <button type="button" class="btn ghost compact" @click="onClearLogs">清除</button>
+            <button type="button" class="btn ghost compact" @click="onCopyLogs">复制</button>
+          </div>
+        </div>
+        <div class="task-scrollbar logs-list">
+          <p v-for="(entry, idx) in logs" :key="`${entry.timestamp}-${entry.tag}-${idx}`">{{ formatLogLine(entry) }}</p>
+          <p v-if="logs.length === 0" class="empty-log">暂无日志</p>
+        </div>
       </div>
-      <div class="task-scrollbar max-h-48 overflow-y-auto rounded-[6px] border border-[color:var(--border)] bg-[color:var(--bg-solid)] px-2 py-1">
-        <p
-          v-for="(entry, idx) in logs"
-          :key="`${entry.timestamp}-${entry.tag}-${idx}`"
-          class="border-b border-[color:var(--border-light)] py-1 font-mono text-[11px] leading-4 text-[color:var(--text-primary)] last:border-b-0"
-        >
-          {{ formatLogLine(entry) }}
-        </p>
-        <p v-if="logs.length === 0" class="py-2 font-mono text-[11px] text-[color:var(--text-tertiary)]">暂无日志</p>
-      </div>
-    </div>
+    </Transition>
   </section>
 </template>
 
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
-import { onMounted, reactive, ref, watch } from 'vue';
+import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
+import Icon from './Icon.vue';
+import KbdShortcut from './KbdShortcut.vue';
+import SegmentedControl from './SegmentedControl.vue';
+import { useAppStore } from '../stores/appStore';
+import { useHabitStore } from '../stores/habitStore';
 import { usePetStore } from '../stores/petStore';
+import { useTaskStore } from '../stores/taskStore';
 import { WindowMode } from '../types/pet';
+import { exportDataFile, openBackupFolder, openExportFolder, runDailyBackup, type ExportFormat } from '../services/exportService';
 import { clearLogs, formatLogLine, logs } from '../utils/logger';
 import { setThemePreference, useThemeState, type ThemePreference } from '../utils/theme';
 
@@ -351,8 +373,21 @@ interface PetSettingsPayload {
   window_mode: string;
 }
 
+interface SystemSettingsPayload {
+  menu_bar_enabled: boolean;
+  close_to_menu_bar: boolean;
+  hide_dock_icon: boolean;
+  quick_capture_shortcut: string;
+  quick_capture_notify: boolean;
+  auto_backup: boolean;
+  backup_retention_days: number;
+}
+
 const GITHUB_REPO_URL = 'https://github.com/SkyNone/Topdo';
 const GITHUB_FEEDBACK_URL = 'https://github.com/SkyNone/Topdo/issues';
+const FEISHU_TEMPLATE_URL =
+  'https://s7wd8lze1s.feishu.cn/base/QR7rbtLf0adg0gsFun7cKnYOnGd?table=tblSeF0WH71ITCe7&view=vewMSNDmR0';
+const FEISHU_TUTORIAL_URL = 'https://open.feishu.cn/app';
 
 const emit = defineEmits<{
   (event: 'back'): void;
@@ -360,6 +395,9 @@ const emit = defineEmits<{
 }>();
 
 const petStore = usePetStore();
+const appStore = useAppStore();
+const taskStore = useTaskStore();
+const habitStore = useHabitStore();
 const selectedMode = ref<AppMode>('local');
 const initialMode = ref<AppMode>('local');
 const busy = ref(false);
@@ -380,6 +418,18 @@ const petShowBadge = ref(true);
 const petAnimations = ref(true);
 const petPosition = ref({ x: 0, y: 0 });
 const petWindowMode = ref('panel');
+const hasSavedSecret = ref(false);
+const bitableExpanded = ref(false);
+const credentialExpanded = ref(false);
+const systemMenuBarEnabled = ref(true);
+const systemCloseToMenuBar = ref(true);
+const systemHideDockIcon = ref(false);
+const quickCaptureShortcutDraft = ref('Alt+Space');
+const quickCaptureNotify = ref(true);
+const autoBackup = ref(true);
+const backupRetentionDays = ref(7);
+const dataActionMessage = ref('');
+const dataActionType = ref<StatusType>('success');
 
 const form = reactive<FormState>({
   bitableUrl: '',
@@ -389,10 +439,6 @@ const form = reactive<FormState>({
   tableId: ''
 });
 
-const FEISHU_TEMPLATE_URL =
-  'https://s7wd8lze1s.feishu.cn/base/QR7rbtLf0adg0gsFun7cKnYOnGd?table=tblSeF0WH71ITCe7&view=vewMSNDmR0';
-const FEISHU_TUTORIAL_URL = 'https://open.feishu.cn/app';
-
 const stepState = reactive({
   templateReady: false,
   linkParsed: false,
@@ -400,9 +446,22 @@ const stepState = reactive({
   tutorialCopied: false
 });
 
-const { themePreference, resolvedTheme } = useThemeState();
+const { themePreference } = useThemeState();
 const themePreferenceValue = ref<ThemePreference>(themePreference.value);
-const resolvedThemeLabel = ref<'浅色' | '深色'>(resolvedTheme.value === 'dark' ? '深色' : '浅色');
+
+const feishuConfigured = computed(() => Boolean(form.appToken && form.tableId && form.appId && (form.appSecret || hasSavedSecret.value)));
+const habitModuleEnabledModel = computed({
+  get: () => appStore.habitModuleEnabled,
+  set: (enabled: boolean) => appStore.setHabitModuleEnabled(enabled)
+});
+const reminderEnabledModel = computed({
+  get: () => appStore.reminderEnabled,
+  set: (enabled: boolean) => appStore.setReminderEnabled(enabled)
+});
+const autoUpdateEnabledModel = computed({
+  get: () => appStore.autoUpdateEnabled,
+  set: (enabled: boolean) => appStore.setAutoUpdateEnabled(enabled)
+});
 
 function setStatus(type: StatusType, message: string) {
   statusType.value = type;
@@ -491,6 +550,60 @@ async function loadPetSettings() {
   }
 }
 
+async function loadSystemSettings() {
+  try {
+    const payload = await invoke<SystemSettingsPayload>('get_system_settings');
+    systemMenuBarEnabled.value = payload.menu_bar_enabled;
+    systemCloseToMenuBar.value = payload.close_to_menu_bar;
+    systemHideDockIcon.value = payload.hide_dock_icon;
+    quickCaptureShortcutDraft.value = payload.quick_capture_shortcut || 'Alt+Space';
+    quickCaptureNotify.value = payload.quick_capture_notify;
+    autoBackup.value = payload.auto_backup;
+    backupRetentionDays.value = payload.backup_retention_days || 7;
+  } catch (error) {
+    setStatus('error', String(error));
+  }
+}
+
+async function persistSystemSettings(showMessage = false) {
+  const retentionDays = Math.max(1, Number(backupRetentionDays.value) || 7);
+  const payload = await invoke<SystemSettingsPayload>('save_system_settings', {
+    menuBarEnabled: systemMenuBarEnabled.value,
+    menu_bar_enabled: systemMenuBarEnabled.value,
+    closeToMenuBar: systemCloseToMenuBar.value,
+    close_to_menu_bar: systemCloseToMenuBar.value,
+    hideDockIcon: systemHideDockIcon.value,
+    hide_dock_icon: systemHideDockIcon.value,
+    quickCaptureShortcut: quickCaptureShortcutDraft.value,
+    quick_capture_shortcut: quickCaptureShortcutDraft.value,
+    quickCaptureNotify: quickCaptureNotify.value,
+    quick_capture_notify: quickCaptureNotify.value,
+    autoBackup: autoBackup.value,
+    auto_backup: autoBackup.value,
+    backupRetentionDays: retentionDays,
+    backup_retention_days: retentionDays
+  });
+  systemMenuBarEnabled.value = payload.menu_bar_enabled;
+  systemCloseToMenuBar.value = payload.close_to_menu_bar;
+  systemHideDockIcon.value = payload.hide_dock_icon;
+  quickCaptureShortcutDraft.value = payload.quick_capture_shortcut || quickCaptureShortcutDraft.value;
+  quickCaptureNotify.value = payload.quick_capture_notify;
+  autoBackup.value = payload.auto_backup;
+  backupRetentionDays.value = payload.backup_retention_days || retentionDays;
+  if (showMessage) setStatus('success', '系统级设置已保存');
+}
+
+async function onSaveSystemSettings() {
+  busy.value = true;
+  try {
+    await persistSystemSettings(true);
+  } catch (error) {
+    setStatus('error', String(error));
+  } finally {
+    busy.value = false;
+  }
+}
+
 function buildSaveConfigParams(): Record<string, unknown> {
   return {
     mode: selectedMode.value,
@@ -509,14 +622,10 @@ function buildSaveConfigParams(): Record<string, unknown> {
 
 function parseFeishuBitableUrl(urlText: string): { appToken: string; tableId: string; error?: string } {
   const raw = urlText.trim();
-  if (!raw) {
-    return { appToken: '', tableId: '', error: '链接为空，请先粘贴多维表格链接' };
-  }
+  if (!raw) return { appToken: '', tableId: '', error: '链接为空，请先粘贴多维表格链接' };
 
   let normalized = raw;
-  if (!/^https?:\/\//i.test(normalized)) {
-    normalized = `https://${normalized}`;
-  }
+  if (!/^https?:\/\//i.test(normalized)) normalized = `https://${normalized}`;
 
   let parsedUrl: URL;
   try {
@@ -536,15 +645,9 @@ function parseFeishuBitableUrl(urlText: string): { appToken: string; tableId: st
   const appToken = tokenFromPath || tokenMatch?.[0] || '';
   const tableId = parsedUrl.searchParams.get('table')?.trim() ?? '';
 
-  if (!appToken && !tableId) {
-    return { appToken: '', tableId: '', error: '未找到 App Token 和 Table ID，请确认是多维表格链接' };
-  }
-  if (!appToken) {
-    return { appToken: '', tableId: '', error: '未找到 App Token（base 后的标识）' };
-  }
-  if (!tableId) {
-    return { appToken: '', tableId: '', error: '未找到 Table ID（table=...）' };
-  }
+  if (!appToken && !tableId) return { appToken: '', tableId: '', error: '未找到 App Token 和 Table ID，请确认是多维表格链接' };
+  if (!appToken) return { appToken: '', tableId: '', error: '未找到 App Token（base 后的标识）' };
+  if (!tableId) return { appToken: '', tableId: '', error: '未找到 Table ID（table=...）' };
 
   return { appToken, tableId };
 }
@@ -553,16 +656,14 @@ function parseBitableUrl(silentOnBlur: boolean) {
   const result = parseFeishuBitableUrl(form.bitableUrl);
   if (result.error) {
     stepState.linkParsed = false;
-    if (!silentOnBlur) {
-      setStatus('error', result.error);
-    }
+    if (!silentOnBlur) setStatus('error', result.error);
     return;
   }
 
   form.appToken = result.appToken;
   form.tableId = result.tableId;
   stepState.linkParsed = true;
-  setStatus('success', '✅ 已识别 App Token 和 Table ID');
+  setStatus('success', '已识别 App Token 和 Table ID');
 }
 
 async function openTemplateLink() {
@@ -603,9 +704,11 @@ async function loadConfig() {
     form.appId = config.app_id;
     form.appToken = config.app_token;
     form.tableId = config.table_id;
-    form.bitableUrl =
-      config.app_token && config.table_id ? `https://www.feishu.cn/base/${config.app_token}?table=${config.table_id}` : '';
+    form.bitableUrl = config.app_token && config.table_id ? `https://www.feishu.cn/base/${config.app_token}?table=${config.table_id}` : '';
     form.appSecret = '';
+    hasSavedSecret.value = Boolean(config.has_secret);
+    stepState.linkParsed = Boolean(config.app_token && config.table_id);
+    stepState.credentialReady = Boolean(config.app_id && config.has_secret);
 
     if (config.has_secret && mode === 'feishu') {
       setStatus('success', '已检测到已保存的 App Secret（加密）');
@@ -628,16 +731,17 @@ async function loadAutostartState() {
   }
 }
 
-async function onSave() {
+async function saveSettings(emitSaved = true): Promise<boolean> {
   busy.value = true;
   try {
-    console.log('[Settings] 保存模式:', selectedMode.value);
     const effectiveWindowMode = petEnabled.value ? petWindowMode.value : WindowMode.Panel;
 
-    const saveResult = await invoke('save_config', buildSaveConfigParams());
-    console.log('[Settings] save_config 返回:', saveResult);
     if (selectedMode.value === 'feishu') {
+      await invoke('save_config', buildSaveConfigParams());
+      if (form.appSecret) hasSavedSecret.value = true;
       form.appSecret = '';
+    } else {
+      await invoke('set_app_mode', { mode: 'local' });
     }
 
     await invoke('save_pet_settings', {
@@ -661,36 +765,57 @@ async function onSave() {
     });
 
     const verifiedMode = await invoke<string>('get_app_mode');
-    console.log('[Settings] 保存后读取模式:', verifiedMode);
     if (verifiedMode !== selectedMode.value) {
       throw new Error(`模式保存失败，期望 ${selectedMode.value}，实际 ${verifiedMode || '空值'}`);
     }
     initialMode.value = selectedMode.value;
 
     if (autostartEnabled.value !== initialAutostartEnabled.value) {
-      if (autostartEnabled.value) {
-        await enableAutostart();
-      } else {
-        await disableAutostart();
-      }
+      if (autostartEnabled.value) await enableAutostart();
+      else await disableAutostart();
       initialAutostartEnabled.value = autostartEnabled.value;
     }
+    await persistSystemSettings(false);
 
     setStatus('success', '设置保存成功');
-    emit('saved', selectedMode.value);
+    if (emitSaved) {
+      emit('saved', selectedMode.value);
+    }
+    return true;
   } catch (error) {
     setStatus('error', String(error));
+    return false;
   } finally {
     busy.value = false;
   }
 }
 
+async function onSave() {
+  await saveSettings(true);
+}
+
+async function onSaveSection(section: 'bitable' | 'credential') {
+  const saved = await saveSettings(false);
+  if (saved) {
+    if (section === 'bitable') bitableExpanded.value = false;
+    if (section === 'credential') credentialExpanded.value = false;
+  }
+}
+
+async function onCancelBitableEdit() {
+  await loadConfig();
+  bitableExpanded.value = false;
+}
+
+async function onCancelCredentialEdit() {
+  await loadConfig();
+  credentialExpanded.value = false;
+}
+
 async function onTestConnection() {
   busy.value = true;
   try {
-    if (selectedMode.value !== 'feishu') {
-      throw new Error('请先切换到飞书同步模式');
-    }
+    if (selectedMode.value !== 'feishu') throw new Error('请先切换到飞书同步模式');
     await invoke('save_config', buildSaveConfigParams());
     const result = await invoke<ConnectionResult>('test_connection');
     stepState.credentialReady = result.success;
@@ -746,11 +871,82 @@ async function onOpenFeedback() {
   }
 }
 
+async function ensureNotificationPermission() {
+  let granted = await isPermissionGranted();
+  if (!granted) {
+    granted = (await requestPermission()) === 'granted';
+  }
+  return granted;
+}
+
+async function onSendTestNotification() {
+  try {
+    if (!(await ensureNotificationPermission())) {
+      setStatus('error', '系统通知权限未开启，请在 macOS 系统设置中允许 Topdo 发送通知');
+      return;
+    }
+    sendNotification({ title: 'Topdo 通知测试', body: '如果你看到这条通知，说明通知权限已生效。' });
+    setStatus('success', '测试通知已发送');
+  } catch (error) {
+    setStatus('error', `发送测试通知失败: ${String(error)}`);
+  }
+}
+
+async function ensureExportDataLoaded() {
+  if (!taskStore.tasks.length) await taskStore.fetchTasks();
+  if (appStore.habitModuleEnabled && !habitStore.habits.length) await habitStore.fetchHabits();
+}
+
+async function onExportData(format: ExportFormat) {
+  busy.value = true;
+  try {
+    await ensureExportDataLoaded();
+    const path = await exportDataFile(format, taskStore.tasks, habitStore.habits);
+    await openExportFolder();
+    dataActionType.value = 'success';
+    dataActionMessage.value = `已导出：${path}`;
+    setStatus('success', `已导出到 ${path}`);
+  } catch (error) {
+    dataActionType.value = 'error';
+    dataActionMessage.value = `导出失败：${String(error)}`;
+    setStatus('error', `导出失败: ${String(error)}`);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function onRunBackupNow() {
+  busy.value = true;
+  try {
+    await ensureExportDataLoaded();
+    const path = await runDailyBackup(taskStore.tasks, habitStore.habits, backupRetentionDays.value);
+    dataActionType.value = 'success';
+    dataActionMessage.value = `已备份：${path}`;
+    setStatus('success', `已备份到 ${path}`);
+  } catch (error) {
+    dataActionType.value = 'error';
+    dataActionMessage.value = `备份失败：${String(error)}`;
+    setStatus('error', `备份失败: ${String(error)}`);
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function onOpenBackupFolder() {
+  try {
+    await openBackupFolder();
+  } catch (error) {
+    setStatus('error', `打开备份文件夹失败: ${String(error)}`);
+  }
+}
+
 onMounted(() => {
+  appStore.load();
   void loadConfig();
   void loadShortcutConfig();
   void loadModeShortcutConfig();
   void loadPetSettings();
+  void loadSystemSettings();
   void loadAutostartState();
 });
 
@@ -759,12 +955,18 @@ function handleEsc(): boolean {
     showLogs.value = false;
     return true;
   }
+  if (credentialExpanded.value) {
+    credentialExpanded.value = false;
+    return true;
+  }
+  if (bitableExpanded.value) {
+    bitableExpanded.value = false;
+    return true;
+  }
   return false;
 }
 
-defineExpose({
-  handleEsc
-});
+defineExpose({ handleEsc });
 
 watch(
   () => themePreference.value,
@@ -777,37 +979,597 @@ watch(
   () => themePreferenceValue.value,
   (value) => {
     setThemePreference(value);
-    resolvedThemeLabel.value = resolvedTheme.value === 'dark' ? '深色' : '浅色';
-  }
-);
-
-watch(
-  () => resolvedTheme.value,
-  (value) => {
-    resolvedThemeLabel.value = value === 'dark' ? '深色' : '浅色';
   }
 );
 </script>
 
 <style scoped>
-.action-btn {
+.settings-page {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 16px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.settings-header h2 {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 700;
+}
+
+.settings-group {
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-solid);
+}
+
+.padded-group {
+  padding: 12px;
+}
+
+.setting-row {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border-light);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.setting-row:last-child {
+  border-bottom: 0;
+}
+
+.setting-row.clickable {
+  cursor: pointer;
+}
+
+.setting-row.clickable:hover,
+.full-row-button:hover {
+  background: var(--bg-hover);
+}
+
+.setting-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-solid));
+}
+
+.setting-icon.green {
+  color: #10b981;
+  background: color-mix(in srgb, #10b981 12%, var(--bg-solid));
+}
+
+.setting-icon.orange {
+  color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 14%, var(--bg-solid));
+}
+
+.setting-icon.gray {
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+}
+
+.setting-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.setting-name {
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.setting-arrow {
+  color: var(--text-tertiary);
+  transition: transform 0.16s ease;
+}
+
+.setting-arrow.open {
+  transform: rotate(90deg);
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, #10b981 25%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #10b981 10%, var(--bg-solid));
+  color: #047857;
+}
+
+.sync-status.error {
+  border-color: color-mix(in srgb, var(--priority-high) 25%, var(--border));
+  background: color-mix(in srgb, var(--priority-high) 8%, var(--bg-solid));
+  color: var(--priority-high);
+}
+
+.sync-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.sync-status p {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.sync-status span:not(.sync-dot) {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.form-hint {
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.expand-enter-active,
+.expand-leave-active {
+  transition: all 0.16s ease;
+  overflow: hidden;
+}
+
+.expand-enter-from,
+.expand-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+.expand-enter-to,
+.expand-leave-from {
+  max-height: 520px;
+  opacity: 1;
+}
+
+.expand-section {
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-secondary);
+}
+
+.expand-inner {
+  padding: 14px 16px 16px;
+}
+
+.expand-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.step {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 10px;
+}
+
+.form-group {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-row.two-col .form-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-input {
+  width: 100%;
+  height: 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-solid);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 20px;
+  outline: none;
+  padding: 0 12px;
+  transition: border 0.15s ease, box-shadow 0.15s ease;
+}
+
+.form-input:focus {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-focus);
+}
+
+.form-input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.parse-result,
+.annotation,
+.inline-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  border: 1px solid color-mix(in srgb, #10b981 25%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #10b981 8%, var(--bg-solid));
+  color: #047857;
+  font-size: 12px;
+  line-height: 16px;
+  padding: 8px 10px;
+}
+
+.annotation {
+  align-items: flex-start;
+  border-color: color-mix(in srgb, var(--primary) 25%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-solid));
+  color: var(--primary);
+}
+
+.inline-note {
+  margin: 0 16px 12px;
+}
+
+.text-link {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-row,
+.action-row,
+.footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-row,
+.action-row {
+  padding-top: 12px;
+}
+
+.action-row {
+  padding: 10px 16px 14px;
+}
+
+.action-row.wrap {
+  flex-wrap: wrap;
+}
+
+.shortcut-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px 14px 60px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.shortcut-editor .form-input {
+  min-width: 0;
+}
+
+.backup-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 14px 60px;
+  border-top: 1px solid var(--border-light);
+}
+
+.backup-retention {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--text-secondary);
   font-size: 12px;
-  padding: 8px 4px;
-  transition: all 0.15s ease;
+  line-height: 16px;
 }
 
-.action-btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+.backup-retention .form-input {
+  max-width: 92px;
 }
 
-.action-btn:disabled {
+.inline-result {
+  margin: 0 16px 12px 60px;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  word-break: break-word;
+}
+
+.inline-result.success {
+  background: color-mix(in srgb, #10b981 10%, var(--bg-solid));
+  color: #047857;
+}
+
+.inline-result.error {
+  background: color-mix(in srgb, var(--priority-high) 8%, var(--bg-solid));
+  color: var(--priority-high);
+}
+
+.btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 14px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border 0.15s ease, transform 0.1s ease;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
 
+.btn.primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.btn.secondary,
+.ghost-btn {
+  border-color: var(--border);
+  background: var(--bg-solid);
+  color: var(--text-secondary);
+}
+
+.btn.secondary:hover:not(:disabled),
+.ghost-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.btn.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn.compact {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.ghost-btn {
+  min-height: 32px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.encrypted-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, #10b981 25%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, #10b981 8%, var(--bg-solid));
+  color: #047857;
+  font-size: 10px;
+  line-height: 14px;
+  padding: 1px 5px;
+}
+
+.toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 42px;
+  height: 24px;
+  cursor: pointer;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toggle span {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  transition: background 0.15s ease;
+}
+
+.toggle span::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--bg-solid);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease;
+}
+
+.toggle input:checked + span {
+  background: var(--primary);
+}
+
+.toggle input:checked + span::after {
+  transform: translateX(18px);
+}
+
+.toggle input:disabled + span {
+  opacity: 0.55;
+}
+
+.nested-options {
+  display: grid;
+  gap: 8px;
+  padding: 10px 16px 14px 60px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.nested-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-message {
+  margin: 12px 0 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.status-message.success {
+  background: color-mix(in srgb, #10b981 10%, var(--bg-solid));
+  color: #047857;
+}
+
+.status-message.error {
+  background: color-mix(in srgb, var(--priority-high) 8%, var(--bg-solid));
+  color: var(--priority-high);
+}
+
+.error-detail,
+.logs-panel {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-solid);
+  padding: 10px;
+}
+
+.error-actions,
+.logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.error-detail pre,
+.logs-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logs-list p {
+  border-bottom: 1px solid var(--border-light);
+  padding: 4px 0;
+}
+
+.logs-list p:last-child {
+  border-bottom: 0;
+}
+
+.empty-log {
+  color: var(--text-tertiary);
+}
+
+.footer-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: 16px;
+  padding: 12px 0 0;
+  background: linear-gradient(to top, var(--bg-secondary) 78%, transparent);
+}
+
+.footer-actions .btn {
+  flex: 1;
+}
 </style>

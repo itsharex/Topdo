@@ -32,7 +32,7 @@
       </button>
     </div>
 
-    <div data-tauri-drag-region class="title-text">Topdo</div>
+    <div class="title-text"><ModeDropdown /></div>
 
     <div class="titlebar-actions" data-no-drag @dblclick.stop>
       <button
@@ -91,6 +91,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import ModeDropdown from './ModeDropdown.vue';
 
 const props = defineProps<{
   alwaysOnTop: boolean;
@@ -116,7 +117,10 @@ function onBlur() {
   windowFocused.value = false;
 }
 
-function onDoubleClick() {
+function onDoubleClick(event: MouseEvent) {
+  if (event.target instanceof HTMLElement && event.target.closest('[data-no-drag]')) {
+    return;
+  }
   emit('mini');
 }
 
@@ -160,6 +164,9 @@ onBeforeUnmount(() => {
   background: transparent;
   border-bottom: 0.5px solid var(--border-light);
   position: relative;
+  z-index: 90;
+  overflow: visible;
+  flex-shrink: 0;
 }
 
 .traffic-lights {
@@ -212,12 +219,13 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 100;
   font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.01em;
-  pointer-events: none;
   user-select: none;
+  -webkit-app-region: no-drag;
 }
 
 .titlebar-actions {
@@ -226,6 +234,8 @@ onBeforeUnmount(() => {
   gap: 2px;
   -webkit-app-region: no-drag;
   margin-left: auto;
+  position: relative;
+  z-index: 110;
 }
 
 .titlebar-action {
