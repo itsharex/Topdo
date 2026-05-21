@@ -199,20 +199,42 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useTaskStore } from '../stores/taskStore';
 import type { RecurrenceRule, SubTask } from '../types';
 import { buildDueDateValue } from '../utils/dueDate';
 import Icon from './Icon.vue';
 
-const emit = defineEmits<{
-  (event: 'close'): void;
-  (event: 'created'): void;
-  (event: 'error', message: string): void;
-}>();
-
 type ExpandedOption = 'priority' | 'date' | 'repeat' | 'reminder' | null;
 type RepeatValue = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
+
+interface QuickInputTemplate {
+  name: string;
+  priority?: string;
+  dueDate?: string;
+  dueTime?: string;
+  recurrenceRule?: RecurrenceRule | null;
+  reminderBefore?: number | null;
+  notes?: string;
+  expand?: ExpandedOption;
+}
+
+interface CreatedTaskPayload {
+  recordId: string;
+  name: string;
+  dueDate: string;
+  reminderBefore: number | null;
+}
+
+const props = defineProps<{
+  template?: QuickInputTemplate | null;
+}>();
+
+const emit = defineEmits<{
+  (event: 'close'): void;
+  (event: 'created', payload: CreatedTaskPayload): void;
+  (event: 'error', message: string): void;
+}>();
 
 const taskStore = useTaskStore();
 
@@ -418,6 +440,26 @@ function reset() {
   expandedOption.value = null;
 }
 
+function applyTemplate(template: QuickInputTemplate | null | undefined) {
+  if (!template) return;
+  taskName.value = template.name || '';
+  selectedPriority.value = template.priority || '普通';
+  selectedDueDate.value = template.dueDate || '';
+  selectedDateOption.value = template.dueDate || null;
+  selectedDueTime.value = template.dueDate ? (template.dueTime || '23:59') : '';
+  selectedRecurrenceRule.value = template.recurrenceRule ? JSON.parse(JSON.stringify(template.recurrenceRule)) : null;
+  selectedReminderBefore.value = template.reminderBefore ?? null;
+  note.value = template.notes || '';
+  expandedOption.value = template.expand ?? null;
+  if (template.dueDate) {
+    const date = new Date(`${template.dueDate}T00:00:00`);
+    if (!Number.isNaN(date.getTime())) {
+      calendarMonth.value = new Date(date.getFullYear(), date.getMonth(), 1);
+    }
+  }
+  void nextTick(() => inputRef.value?.focus());
+}
+
 function newSubTask(text = ''): SubTask {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -444,12 +486,13 @@ function removeSubTask(id: string) {
 async function handleCreate() {
   const name = taskName.value.trim();
   if (!name || submitting.value) return;
+  const dueDate = buildDueDateValue(selectedDueDate.value, selectedDueTime.value);
 
   const payload = {
     name,
     priority: selectedPriority.value,
     status: '待处理',
-    due_date: buildDueDateValue(selectedDueDate.value, selectedDueTime.value),
+    due_date: dueDate,
     notes: note.value.trim(),
     sub_tasks: subTasks.value.filter((item) => item.text.trim()).map((item) => ({ ...item, text: item.text.trim() })),
     recurrence_rule: selectedRecurrenceRule.value,
@@ -459,9 +502,15 @@ async function handleCreate() {
   submitting.value = true;
 
   try {
-    await taskStore.createTask(payload);
+    const reminderBefore = selectedReminderBefore.value;
+    const recordId = await taskStore.createTask(payload);
     reset();
-    emit('created');
+    emit('created', {
+      recordId,
+      name,
+      dueDate,
+      reminderBefore
+    });
     emit('close');
   } catch (error) {
     emit('error', `创建任务失败：${String(error)}`);
@@ -484,6 +533,7 @@ function onGlobalMouseDown(event: MouseEvent) {
 }
 
 onMounted(() => {
+  applyTemplate(props.template);
   nextTick(() => inputRef.value?.focus());
   document.addEventListener('mousedown', onGlobalMouseDown);
 });
@@ -491,6 +541,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onGlobalMouseDown);
 });
+
+watch(
+  () => props.template,
+  (template) => applyTemplate(template),
+  { deep: true }
+);
 </script>
 
 <style scoped>

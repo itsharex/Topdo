@@ -3,8 +3,9 @@
     <Transition name="create-panel">
       <QuickInput
         v-if="creating"
+        :template="createTemplate"
         @close="emit('cancel-create')"
-        @created="emit('created')"
+        @created="emit('created', $event)"
         @error="emit('error', $event)"
       />
     </Transition>
@@ -12,6 +13,23 @@
     <div v-if="displayedTasks.length === 0 && !creating" class="empty-state">
       <div class="empty-icon">{{ emptyIcon }}</div>
       <div class="empty-text">{{ emptyText }}</div>
+      <div v-if="showStarterTemplates" class="starter-templates">
+        <p>可以从一个模板开始：</p>
+        <button
+          v-for="template in starterTemplates"
+          :key="template.key"
+          type="button"
+          class="starter-template"
+          @click="onStarterTemplate(template)"
+        >
+          <span class="starter-template__icon">{{ template.icon }}</span>
+          <span>
+            <strong>{{ template.title }}</strong>
+            <small>{{ template.description }}</small>
+          </span>
+          <span class="starter-template__arrow">›</span>
+        </button>
+      </div>
     </div>
 
     <div v-else class="task-list">
@@ -63,22 +81,43 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { useTaskStore } from '../stores/taskStore';
 import type { SyncState } from '../stores/taskStore';
-import type { Task } from '../types';
+import type { RecurrenceRule, Task } from '../types';
 import QuickInput from './QuickInput.vue';
 import TaskItem from './TaskItem.vue';
+
+interface QuickTaskTemplate {
+  name: string;
+  priority?: string;
+  dueDate?: string;
+  dueTime?: string;
+  recurrenceRule?: RecurrenceRule | null;
+  reminderBefore?: number | null;
+  notes?: string;
+  expand?: 'priority' | 'date' | 'repeat' | 'reminder' | null;
+}
+
+interface CreatedTaskPayload {
+  recordId: string;
+  name: string;
+  dueDate: string;
+  reminderBefore: number | null;
+}
 
 const props = defineProps<{
   mode: 'local' | 'feishu';
   creating: boolean;
+  createTemplate?: QuickTaskTemplate | null;
   statusSyncState: Record<string, SyncState>;
   notesSyncState: Record<string, SyncState>;
 }>();
 
 const emit = defineEmits<{
   (event: 'cancel-create'): void;
-  (event: 'created'): void;
+  (event: 'created', payload: CreatedTaskPayload): void;
   (event: 'error', message: string): void;
   (event: 'request-delete', task: Task): void;
+  (event: 'create-template', template: QuickTaskTemplate): void;
+  (event: 'create-habit-template'): void;
 }>();
 
 const store = useTaskStore();
@@ -89,6 +128,45 @@ const dragOverGroup = ref('');
 const dragOverTaskId = ref('');
 const dragOverPlacement = ref<'before' | 'after'>('before');
 const itemRefs = new Map<string, any>();
+
+const starterTemplates = computed(() => [
+  {
+    key: 'follow-up',
+    icon: '📌',
+    title: '明天跟进重要事项',
+    description: '重要 · 明天 10:00',
+    template: {
+      name: '明天跟进重要事项',
+      priority: '重要',
+      dueDate: offsetDateKey(1),
+      dueTime: '10:00',
+      reminderBefore: null,
+      expand: null
+    } satisfies QuickTaskTemplate
+  },
+  {
+    key: 'weekly-report',
+    icon: '↻',
+    title: '每周五写周报',
+    description: '重复 · 周五 18:00',
+    template: {
+      name: '每周五写周报',
+      priority: '普通',
+      dueDate: thisFridayKey(),
+      dueTime: '18:00',
+      recurrenceRule: { type: 'weekly', interval: 1, daysOfWeek: [5] },
+      reminderBefore: 0,
+      expand: null
+    } satisfies QuickTaskTemplate
+  },
+  {
+    key: 'habit-water',
+    icon: '🎯',
+    title: '每天喝水',
+    description: '习惯模板 · 去习惯页创建',
+    template: null
+  }
+]);
 
 const priorityGroups = [
   { key: 'urgent', priority: '紧急', label: '紧急' },
@@ -142,6 +220,34 @@ const emptyText = computed(() => {
   if (store.filter === 'in_progress') return '还没有进行中的任务';
   return '今日无事，享受片刻';
 });
+
+const showStarterTemplates = computed(() => !store.hasActiveSearch && store.totalTaskCount === 0 && store.filter !== 'done');
+
+function dateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function offsetDateKey(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return dateKey(date);
+}
+
+function thisFridayKey(): string {
+  const date = new Date();
+  const day = date.getDay();
+  const distance = (5 - day + 7) % 7;
+  date.setDate(date.getDate() + distance);
+  return dateKey(date);
+}
+
+function onStarterTemplate(item: { key: string; template: QuickTaskTemplate | null }) {
+  if (item.key === 'habit-water') {
+    emit('create-habit-template');
+    return;
+  }
+  if (item.template) emit('create-template', item.template);
+}
 
 function setTaskItemRef(recordId: string, el: any | null) {
   if (!el) {
@@ -334,6 +440,72 @@ watch(
   font-size: var(--font-size-md);
   font-weight: 400;
   color: var(--text-secondary);
+}
+
+.starter-templates {
+  width: min(100%, 320px);
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.starter-templates p {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.starter-template {
+  min-height: 54px;
+  padding: 9px 12px;
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 14px;
+  background: var(--bg-solid);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.starter-template:hover {
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--border));
+  background: color-mix(in srgb, var(--primary) 5%, var(--bg-solid));
+  transform: translateY(-1px);
+}
+
+.starter-template__icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  font-size: 16px;
+}
+
+.starter-template strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.starter-template small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.starter-template__arrow {
+  color: var(--text-tertiary);
+  font-size: 18px;
 }
 
 .task-list {

@@ -52,7 +52,7 @@
 
         <section v-else class="flex min-h-0 flex-1 flex-col bg-transparent">
           <div class="px-3 pt-2">
-            <StatsBar @add="createInlineVisible = true" />
+            <StatsBar @add="openCreateTask()" />
           </div>
           <div v-if="searchQueryLabel" class="px-3 pt-2">
             <div class="search-state-bar">
@@ -77,13 +77,32 @@
             ref="taskListRef"
             :mode="taskStore.mode"
             :creating="createInlineVisible"
+            :create-template="createTemplate"
             :status-sync-state="taskStore.statusSyncState"
             :notes-sync-state="taskStore.notesSyncState"
-            @cancel-create="createInlineVisible = false"
-            @created="createInlineVisible = false"
+            @cancel-create="closeCreateTask"
+            @created="onTaskCreated"
+            @create-template="openCreateTask"
+            @create-habit-template="openHabitTemplate"
             @error="showError"
             @request-delete="openDeleteDialog"
           />
+
+          <div v-if="firstReminderNudge" class="first-reminder-nudge">
+            <div class="first-reminder-nudge__copy">
+              <strong>要不要给「{{ firstReminderNudge.name }}」加个提醒？</strong>
+              <span>{{ firstReminderNudge.dueDate ? '到时间后会通过系统通知和应用内提醒提示。' : '可以先设一个今天 23:59 的提醒，避免写完就忘。' }}</span>
+            </div>
+            <div class="first-reminder-nudge__actions">
+              <button type="button" class="first-reminder-nudge__primary" @click="applyFirstReminderNudge('primary')">
+                {{ firstReminderNudge.dueDate ? '到期时提醒' : '今天 23:59' }}
+              </button>
+              <button type="button" @click="applyFirstReminderNudge('secondary')">
+                {{ firstReminderNudge.dueDate ? '提前30分钟' : '明天 10:00' }}
+              </button>
+              <button type="button" class="first-reminder-nudge__ghost" @click="dismissFirstReminderNudge">稍后</button>
+            </div>
+          </div>
 
           <PanelCatCorner
             v-if="petStore.enabled"
@@ -198,7 +217,7 @@ import { useHabitStore } from './stores/habitStore';
 import { usePetStore } from './stores/petStore';
 import { useTaskStore } from './stores/taskStore';
 import type { TaskFilter } from './stores/taskStore';
-import type { Task } from './types';
+import type { RecurrenceRule, Task } from './types';
 import { WindowMode } from './types/pet';
 import { startHabitReminderService, startReminderService, type InAppReminder } from './utils/reminder';
 import { initializeTheme, toggleThemeQuickly, useThemeState } from './utils/theme';
@@ -220,6 +239,24 @@ interface WindowModeChangedPayload {
   mini_mode: boolean;
 }
 
+interface QuickTaskTemplate {
+  name: string;
+  priority?: string;
+  dueDate?: string;
+  dueTime?: string;
+  recurrenceRule?: RecurrenceRule | null;
+  reminderBefore?: number | null;
+  notes?: string;
+  expand?: 'priority' | 'date' | 'repeat' | 'reminder' | null;
+}
+
+interface CreatedTaskPayload {
+  recordId: string;
+  name: string;
+  dueDate: string;
+  reminderBefore: number | null;
+}
+
 const taskStore = useTaskStore();
 const appStore = useAppStore();
 const habitStore = useHabitStore();
@@ -230,6 +267,7 @@ const currentView = ref<ViewType>('main');
 const isMiniMode = ref(false);
 const isAlwaysOnTop = ref(true);
 const createInlineVisible = ref(false);
+const createTemplate = ref<QuickTaskTemplate | null>(null);
 const shortcutSheetVisible = ref(false);
 const miniPressed = ref(false);
 const miniDragging = ref(false);
@@ -257,8 +295,10 @@ const settingsRef = ref<any>(null);
 
 const ONBOARDING_KEY = 'topdo_onboarding_v1_dismissed';
 const SHORTCUT_TIP_KEY = 'topdo_shortcut_tip_seen_v1';
+const FIRST_REMINDER_NUDGE_KEY = 'topdo_first_reminder_nudge_seen_v1';
 const onboardingPendingFromFirstLaunch = ref(false);
 const showOnboarding = ref(false);
+const firstReminderNudge = ref<CreatedTaskPayload | null>(null);
 const showMiniPet = computed(() => isMiniMode.value && petStore.enabled);
 const searchQueryLabel = computed(() => taskStore.searchQuery.trim());
 const searchResultCount = computed(() => taskStore.filteredTasks.length);
@@ -418,6 +458,83 @@ async function onSettingsSaved(mode: 'local' | 'feishu') {
     // 保持当前模式，仅提示错误
     showError(String(error));
   }
+}
+
+function openCreateTask(template: QuickTaskTemplate | null = null) {
+  appStore.switchMode('tasks');
+  currentView.value = 'main';
+  createTemplate.value = template;
+  createInlineVisible.value = true;
+}
+
+function closeCreateTask() {
+  createInlineVisible.value = false;
+  createTemplate.value = null;
+}
+
+function wasFirstReminderNudgeSeen(): boolean {
+  try {
+    return localStorage.getItem(FIRST_REMINDER_NUDGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markFirstReminderNudgeSeen() {
+  try {
+    localStorage.setItem(FIRST_REMINDER_NUDGE_KEY, '1');
+  } catch {
+    // ignore
+  }
+}
+
+function onTaskCreated(payload: CreatedTaskPayload) {
+  closeCreateTask();
+  if (!payload.recordId) return;
+  if (payload.reminderBefore !== null) return;
+  if (wasFirstReminderNudgeSeen()) return;
+  firstReminderNudge.value = payload;
+}
+
+function dismissFirstReminderNudge() {
+  firstReminderNudge.value = null;
+  markFirstReminderNudgeSeen();
+}
+
+function dateKeyWithOffset(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+async function applyFirstReminderNudge(kind: 'primary' | 'secondary') {
+  const nudge = firstReminderNudge.value;
+  if (!nudge) return;
+
+  const patch = nudge.dueDate
+    ? { reminder_before: kind === 'primary' ? 0 : 30 }
+    : {
+        due_date: kind === 'primary'
+          ? `${dateKeyWithOffset(0)}T23:59`
+          : `${dateKeyWithOffset(1)}T10:00`,
+        reminder_before: 0
+      };
+
+  try {
+    await taskStore.updateTaskDetails(nudge.recordId, patch);
+    showToast('提醒已设置');
+    dismissFirstReminderNudge();
+  } catch (error) {
+    showError(`设置提醒失败：${String(error)}`);
+  }
+}
+
+function openHabitTemplate() {
+  appStore.setHabitModuleEnabled(true);
+  appStore.switchMode('habits');
+  currentView.value = 'main';
+  closeCreateTask();
+  showToast('已打开习惯页，可以点击 + 创建「每天喝水」');
 }
 
 async function ensureNotificationPermission() {
@@ -706,7 +823,7 @@ function onGlobalKeydown(event: KeyboardEvent) {
       return;
     }
     if (createInlineVisible.value) {
-      createInlineVisible.value = false;
+      closeCreateTask();
       return;
     }
     return;
@@ -715,7 +832,7 @@ function onGlobalKeydown(event: KeyboardEvent) {
   if (isMeta && key === 'n') {
     event.preventDefault();
     if (currentView.value !== 'main') return;
-    createInlineVisible.value = true;
+    openCreateTask();
     return;
   }
 
@@ -970,6 +1087,66 @@ watch(
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   overflow: visible;
+}
+
+.first-reminder-nudge {
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: 14px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, var(--bg-solid)), var(--bg-solid));
+  box-shadow: var(--shadow-sm);
+}
+
+.first-reminder-nudge__copy {
+  display: grid;
+  gap: 3px;
+}
+
+.first-reminder-nudge__copy strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.first-reminder-nudge__copy span {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.first-reminder-nudge__actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.first-reminder-nudge__actions button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-solid);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.first-reminder-nudge__actions .first-reminder-nudge__primary {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
+.first-reminder-nudge__actions .first-reminder-nudge__ghost {
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
 }
 
 .mini-shell {
