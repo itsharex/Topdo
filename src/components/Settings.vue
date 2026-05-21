@@ -232,7 +232,7 @@
       <button type="button" class="setting-row clickable full-row-button" :disabled="busy" @click="onCheckUpdates">
         <span class="setting-icon gray"><Icon name="info" :size="18" /></span>
         <div class="setting-text">
-          <p class="setting-name">Topdo v2.0</p>
+          <p class="setting-name">Topdo v2.0.1</p>
         </div>
         <Icon name="chevron-right" :size="17" />
       </button>
@@ -366,7 +366,7 @@ const GITHUB_REPO_URL = 'https://github.com/SkyNone/Topdo';
 const GITHUB_FEEDBACK_URL = 'https://github.com/SkyNone/Topdo/issues';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/SkyNone/Topdo/releases/latest';
 const GITHUB_LATEST_RELEASE_URL = 'https://github.com/SkyNone/Topdo/releases/latest';
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.0.1';
 const FEISHU_TEMPLATE_URL =
   'https://s7wd8lze1s.feishu.cn/base/QR7rbtLf0adg0gsFun7cKnYOnGd?table=tblSeF0WH71ITCe7&view=vewMSNDmR0';
 const FEISHU_TUTORIAL_URL = 'https://open.feishu.cn/app';
