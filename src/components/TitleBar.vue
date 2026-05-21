@@ -267,7 +267,7 @@ onBeforeUnmount(() => {
 }
 
 .titlebar-action.active:hover {
-  background: rgba(0, 122, 255, 0.08);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
 }
 
 .titlebar-action svg {

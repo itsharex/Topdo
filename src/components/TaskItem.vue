@@ -992,8 +992,8 @@ defineExpose({
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  border: 1.5px solid #c7c7cc;
-  background: white;
+  border: 1.5px solid var(--text-placeholder);
+  background: var(--bg-solid);
   flex-shrink: 0;
   cursor: pointer;
   display: flex;
@@ -1009,7 +1009,7 @@ defineExpose({
 
 .task-checkbox.in-progress {
   border-color: var(--primary);
-  background: #fff;
+  background: var(--bg-solid);
   overflow: hidden;
 }
 
@@ -1070,8 +1070,8 @@ defineExpose({
 }
 
 .task-checkbox.checked {
-  border-color: #34c759;
-  background: #34c759;
+  border-color: var(--status-done);
+  background: var(--status-done);
 }
 
 .task-content {
@@ -1127,19 +1127,19 @@ defineExpose({
 }
 
 .badge-recurring {
-  color: color-mix(in srgb, #7c3aed 70%, var(--text-secondary));
-  border: 1px solid color-mix(in srgb, #7c3aed 18%, transparent);
-  background: color-mix(in srgb, #7c3aed 7%, var(--bg-solid));
+  color: var(--accent-purple);
+  border: 1px solid color-mix(in srgb, var(--accent-purple) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-purple) 10%, var(--bg-solid));
 }
 
 .badge-due {
-  color: #d97706;
-  background: color-mix(in srgb, #f59e0b 16%, var(--bg-solid));
+  color: var(--accent-amber);
+  background: color-mix(in srgb, var(--accent-amber) 16%, var(--bg-solid));
 }
 
 .badge-overdue {
-  color: #dc2626;
-  background: color-mix(in srgb, #dc2626 13%, var(--bg-solid));
+  color: var(--priority-high);
+  background: color-mix(in srgb, var(--priority-high) 13%, var(--bg-solid));
 }
 
 .subtask-progress {
@@ -1270,8 +1270,8 @@ defineExpose({
 }
 
 .subtask-delete:hover {
-  color: #d93025;
-  background: color-mix(in srgb, #ff3b30 8%, transparent);
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 10%, transparent);
 }
 
 .subtask-add {
@@ -1330,32 +1330,32 @@ defineExpose({
 
 .priority-btn:hover {
   background: var(--bg-hover);
-  border-color: #c7c7cc;
+  border-color: color-mix(in srgb, var(--text-secondary) 36%, var(--border));
 }
 
 .priority-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
 .priority-btn--normal.active {
-  color: #4b5563;
-  background: #eef2f6;
-  border-color: #b7c0cc;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-tertiary) 10%, var(--bg-solid));
+  border-color: color-mix(in srgb, var(--text-tertiary) 48%, var(--border));
 }
 
 .priority-btn--important.active {
-  color: #0b63ce;
-  background: rgba(0, 122, 255, 0.12);
-  border-color: rgba(0, 122, 255, 0.28);
+  color: var(--priority-medium);
+  background: color-mix(in srgb, var(--priority-medium) 12%, var(--bg-solid));
+  border-color: color-mix(in srgb, var(--priority-medium) 36%, var(--border));
 }
 
 .priority-btn--urgent.active {
-  color: #d93025;
-  background: rgba(255, 59, 48, 0.12);
-  border-color: rgba(255, 59, 48, 0.24);
+  color: var(--priority-high);
+  background: color-mix(in srgb, var(--priority-high) 12%, var(--bg-solid));
+  border-color: color-mix(in srgb, var(--priority-high) 34%, var(--border));
 }
 
 .task-right {
@@ -1404,7 +1404,7 @@ defineExpose({
 }
 
 .menu-item.danger {
-  color: #ff8a80;
+  color: var(--accent-red);
 }
 
 .context-menu-enter-active,
@@ -1436,8 +1436,8 @@ defineExpose({
 }
 
 .sync-badge.failed {
-  color: #ff8a80;
-  background: color-mix(in srgb, #ff453a 22%, transparent);
+  color: var(--accent-red);
+  background: color-mix(in srgb, var(--accent-red) 18%, transparent);
   cursor: pointer;
 }
 
@@ -1574,34 +1574,34 @@ defineExpose({
 }
 
 .detail-badge--progress {
-  color: #007aff;
-  background: rgba(0, 122, 255, 0.08);
+  color: var(--status-in-progress);
+  background: color-mix(in srgb, var(--status-in-progress) 12%, var(--bg-solid));
 }
 
 .detail-badge--todo {
-  color: #8e8e93;
-  background: #f5f5f7;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
 }
 
 .detail-badge--done {
-  color: #34c759;
-  background: rgba(52, 199, 89, 0.08);
+  color: var(--status-done);
+  background: color-mix(in srgb, var(--status-done) 12%, var(--bg-solid));
 }
 
 .detail-badge--overdue,
 .detail-badge--urgent {
-  color: #ff3b30;
-  background: #fff2f2;
+  color: var(--priority-high);
+  background: color-mix(in srgb, var(--priority-high) 12%, var(--bg-solid));
 }
 
 .detail-badge--important {
-  color: #007aff;
-  background: #f0f7ff;
+  color: var(--priority-medium);
+  background: color-mix(in srgb, var(--priority-medium) 12%, var(--bg-solid));
 }
 
 .detail-badge--normal {
-  color: #8e8e93;
-  background: #f5f5f7;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
 }
 
 .status-dot {
@@ -1887,14 +1887,14 @@ defineExpose({
   height: 3px;
   overflow: hidden;
   border-radius: 2px;
-  background: #f0f0f0;
+  background: var(--bg-tertiary);
 }
 
 .detail-progress-bar span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #34c759;
+  background: var(--status-done);
 }
 
 .detail-subtask-list {

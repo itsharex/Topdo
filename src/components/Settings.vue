@@ -1036,13 +1036,13 @@ watch(
 }
 
 .setting-icon.green {
-  color: #10b981;
-  background: color-mix(in srgb, #10b981 12%, var(--bg-solid));
+  color: var(--accent-green);
+  background: var(--accent-green-soft);
 }
 
 .setting-icon.orange {
-  color: #f59e0b;
-  background: color-mix(in srgb, #f59e0b 14%, var(--bg-solid));
+  color: var(--accent-amber);
+  background: var(--accent-amber-soft);
 }
 
 .setting-icon.gray {
@@ -1077,10 +1077,10 @@ watch(
   gap: 8px;
   margin-top: 12px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, #10b981 25%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent-green) 25%, var(--border));
   border-radius: 8px;
-  background: color-mix(in srgb, #10b981 10%, var(--bg-solid));
-  color: #047857;
+  background: color-mix(in srgb, var(--accent-green) 10%, var(--bg-solid));
+  color: var(--accent-green);
 }
 
 .sync-status.error {
@@ -1220,10 +1220,10 @@ watch(
   align-items: center;
   gap: 8px;
   margin: 8px 0 0;
-  border: 1px solid color-mix(in srgb, #10b981 25%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent-green) 25%, var(--border));
   border-radius: 8px;
-  background: color-mix(in srgb, #10b981 8%, var(--bg-solid));
-  color: #047857;
+  background: color-mix(in srgb, var(--accent-green) 8%, var(--bg-solid));
+  color: var(--accent-green);
   font-size: 12px;
   line-height: 16px;
   padding: 8px 10px;
@@ -1320,8 +1320,8 @@ watch(
 }
 
 .inline-result.success {
-  background: color-mix(in srgb, #10b981 10%, var(--bg-solid));
-  color: #047857;
+  background: color-mix(in srgb, var(--accent-green) 10%, var(--bg-solid));
+  color: var(--accent-green);
 }
 
 .inline-result.error {
@@ -1404,10 +1404,10 @@ watch(
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  border: 1px solid color-mix(in srgb, #10b981 25%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent-green) 25%, var(--border));
   border-radius: 4px;
-  background: color-mix(in srgb, #10b981 8%, var(--bg-solid));
-  color: #047857;
+  background: color-mix(in srgb, var(--accent-green) 8%, var(--bg-solid));
+  color: var(--accent-green);
   font-size: 10px;
   line-height: 14px;
   padding: 1px 5px;
@@ -1484,8 +1484,8 @@ watch(
 }
 
 .status-message.success {
-  background: color-mix(in srgb, #10b981 10%, var(--bg-solid));
-  color: #047857;
+  background: color-mix(in srgb, var(--accent-green) 10%, var(--bg-solid));
+  color: var(--accent-green);
 }
 
 .status-message.error {
