@@ -257,7 +257,7 @@
         <span class="setting-icon orange"><Icon name="star" :size="18" /></span>
         <div class="setting-text">
           <p class="setting-name">支持作者</p>
-          <p class="support-copy">核心功能免费，觉得不错请作者喝杯咖啡</p>
+          <p class="support-copy">请作者喝杯咖啡</p>
         </div>
         <Icon name="chevron-right" :size="17" />
       </button>

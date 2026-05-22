@@ -11,6 +11,8 @@ Built with **Tauri 2 + Vue 3**
 ![Version](https://img.shields.io/badge/version-v2.0.1-2563eb?style=flat-square)
 ![Arch](https://img.shields.io/badge/arch-Universal%20(Apple%20Silicon%20%2B%20Intel)-10b981?style=flat-square)
 
+![Topdo v2.0.1 产品介绍图](docs/images/topdo-v2.0.1-promo.jpg)
+
 </div>
 
 ---
