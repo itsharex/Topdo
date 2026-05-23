@@ -4,7 +4,7 @@
       <div>
         <h2>设置</h2>
       </div>
-      <button type="button" class="ghost-btn" @click="$emit('back')">返回任务</button>
+      <button type="button" class="ghost-btn settings-back-btn" @click="$emit('back')">返回任务</button>
     </header>
 
     <section class="settings-group padded-group">
@@ -25,11 +25,59 @@
     </section>
 
     <template v-if="selectedMode === 'feishu'">
+      <section class="settings-group feishu-guide">
+        <div class="feishu-guide-header">
+          <span class="setting-icon blue"><Icon name="info" :size="18" /></span>
+          <div class="setting-text">
+            <p class="setting-name">飞书同步配置步骤</p>
+            <p class="guide-copy">按顺序完成模板、凭证和测试连接即可同步。</p>
+          </div>
+        </div>
+        <div class="guide-steps">
+          <button type="button" class="guide-step" :class="{ done: stepState.templateReady }" @click="onOpenTemplateLink">
+            <span class="guide-index">1</span>
+            <span>
+              <strong>打开 Topdo 模板</strong>
+              <em>复制到自己的飞书空间，再复制多维表格链接</em>
+            </span>
+            <span class="guide-status">{{ stepState.templateReady ? '已打开' : '打开' }}</span>
+          </button>
+          <button type="button" class="guide-step" :class="{ done: bitableReady }" @click="openBitableStep">
+            <span class="guide-index">2</span>
+            <span>
+              <strong>粘贴表格链接并解析</strong>
+              <em>Topdo 会自动识别 App Token 和 Table ID</em>
+            </span>
+            <span class="guide-status">{{ bitableReady ? '已解析' : '填写' }}</span>
+          </button>
+          <button type="button" class="guide-step" :class="{ done: credentialReady }" @click="openCredentialStep">
+            <span class="guide-index">3</span>
+            <span>
+              <strong>填写飞书应用凭证</strong>
+              <em>需要 App ID 和 App Secret，不会上传到作者服务器</em>
+            </span>
+            <span class="guide-status">{{ credentialReady ? '已填写' : '填写' }}</span>
+          </button>
+          <button type="button" class="guide-step" :class="{ done: stepState.connectionReady }" :disabled="busy" @click="onTestConnection">
+            <span class="guide-index">4</span>
+            <span>
+              <strong>测试连接并保存</strong>
+              <em>确认 Topdo 可以读写这张多维表格</em>
+            </span>
+            <span class="guide-status">{{ stepState.connectionReady ? '已通过' : '测试' }}</span>
+          </button>
+        </div>
+        <div class="guide-actions">
+          <button type="button" class="btn ghost compact" @click="onOpenTutorialLink">查看配置教程</button>
+          <button type="button" class="btn ghost compact" @click="showLogs = !showLogs">{{ showLogs ? '隐藏日志' : '查看同步日志' }}</button>
+        </div>
+      </section>
+
       <section class="settings-group">
         <div class="setting-row clickable" @click="bitableExpanded = !bitableExpanded">
           <span class="setting-icon blue"><Icon name="link" :size="18" /></span>
           <div class="setting-text">
-            <p class="setting-name">多维表格</p>
+            <p class="setting-name">多维表格信息</p>
           </div>
           <Icon class="setting-arrow" :class="{ open: bitableExpanded }" name="chevron-right" :size="17" />
         </div>
@@ -76,7 +124,7 @@
         <div class="setting-row clickable" @click="credentialExpanded = !credentialExpanded">
           <span class="setting-icon blue"><Icon name="key" :size="18" /></span>
           <div class="setting-text">
-            <p class="setting-name">应用凭证</p>
+            <p class="setting-name">飞书应用凭证</p>
           </div>
           <span v-if="hasSavedSecret" class="encrypted-badge"><Icon name="lock" :size="12" /> 已加密</span>
           <Icon class="setting-arrow" :class="{ open: credentialExpanded }" name="chevron-right" :size="17" />
@@ -107,12 +155,6 @@
             </div>
           </div>
         </Transition>
-
-        <div class="action-row">
-          <button type="button" class="btn secondary" :disabled="busy" @click="onTestConnection">测试连接</button>
-          <button type="button" class="btn secondary" @click="onOpenTemplateLink">打开模板</button>
-          <button type="button" class="btn secondary" @click="showLogs = !showLogs">{{ showLogs ? '隐藏日志' : '查看日志' }}</button>
-        </div>
       </section>
     </template>
 
@@ -232,7 +274,7 @@
       <button type="button" class="setting-row clickable full-row-button" :disabled="busy" @click="onCheckUpdates">
         <span class="setting-icon gray"><Icon name="info" :size="18" /></span>
         <div class="setting-text">
-          <p class="setting-name">Topdo v2.0.1</p>
+          <p class="setting-name">Topdo v2.0.2</p>
         </div>
         <Icon name="chevron-right" :size="17" />
       </button>
@@ -247,6 +289,13 @@
         <span class="setting-icon blue"><Icon name="chat" :size="18" /></span>
         <div class="setting-text">
           <p class="setting-name">反馈建议</p>
+        </div>
+        <Icon name="chevron-right" :size="17" />
+      </button>
+      <button type="button" class="setting-row clickable full-row-button" @click="onOpenPrivacy">
+        <span class="setting-icon green"><Icon name="lock" :size="18" /></span>
+        <div class="setting-text">
+          <p class="setting-name">隐私说明</p>
         </div>
         <Icon name="chevron-right" :size="17" />
       </button>
@@ -376,12 +425,13 @@ interface SystemSettingsPayload {
 const GITHUB_REPO_URL = 'https://github.com/SkyNone/Topdo';
 const GITHUB_FEEDBACK_URL = 'https://github.com/SkyNone/Topdo/issues';
 const GITHUB_SUPPORT_URL = 'https://github.com/SkyNone/Topdo/blob/main/docs/SUPPORT.md';
+const GITHUB_PRIVACY_URL = 'https://github.com/SkyNone/Topdo/blob/main/docs/PRIVACY.md';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/SkyNone/Topdo/releases/latest';
 const GITHUB_LATEST_RELEASE_URL = 'https://github.com/SkyNone/Topdo/releases/latest';
-const APP_VERSION = '2.0.1';
+const APP_VERSION = '2.0.2';
 const FEISHU_TEMPLATE_URL =
   'https://s7wd8lze1s.feishu.cn/base/QR7rbtLf0adg0gsFun7cKnYOnGd?table=tblSeF0WH71ITCe7&view=vewMSNDmR0';
-const FEISHU_TUTORIAL_URL = 'https://open.feishu.cn/app';
+const FEISHU_TUTORIAL_URL = 'https://github.com/SkyNone/Topdo/blob/main/docs/FEISHU_SETUP.md';
 
 const emit = defineEmits<{
   (event: 'back'): void;
@@ -434,13 +484,16 @@ const stepState = reactive({
   templateReady: false,
   linkParsed: false,
   credentialReady: false,
-  tutorialCopied: false
+  tutorialCopied: false,
+  connectionReady: false
 });
 
 const { themePreference } = useThemeState();
 const themePreferenceValue = ref<ThemePreference>(themePreference.value);
 
 const feishuConfigured = computed(() => Boolean(form.appToken && form.tableId && form.appId && (form.appSecret || hasSavedSecret.value)));
+const bitableReady = computed(() => Boolean(form.appToken && form.tableId));
+const credentialReady = computed(() => Boolean(form.appId && (form.appSecret || hasSavedSecret.value)));
 const habitModuleEnabledModel = computed({
   get: () => appStore.habitModuleEnabled,
   set: (enabled: boolean) => appStore.setHabitModuleEnabled(enabled)
@@ -699,6 +752,16 @@ function onOpenTutorialLink() {
   void openTutorialLink();
 }
 
+function openBitableStep() {
+  bitableExpanded.value = true;
+  credentialExpanded.value = false;
+}
+
+function openCredentialStep() {
+  credentialExpanded.value = true;
+  bitableExpanded.value = false;
+}
+
 async function loadConfig() {
   try {
     const config = await invoke<LoadConfigPayload>('load_config');
@@ -713,6 +776,7 @@ async function loadConfig() {
     hasSavedSecret.value = Boolean(config.has_secret);
     stepState.linkParsed = Boolean(config.app_token && config.table_id);
     stepState.credentialReady = Boolean(config.app_id && config.has_secret);
+    stepState.connectionReady = false;
 
     if (config.has_secret && mode === 'feishu') {
       setStatus('success', '已检测到已保存的 App Secret（加密）');
@@ -823,9 +887,11 @@ async function onTestConnection() {
     await invoke('save_config', buildSaveConfigParams());
     const result = await invoke<ConnectionResult>('test_connection');
     stepState.credentialReady = result.success;
+    stepState.connectionReady = result.success;
     setStatus(result.success ? 'success' : 'error', result.message);
   } catch (error) {
     stepState.credentialReady = false;
+    stepState.connectionReady = false;
     setStatus('error', String(error));
   } finally {
     busy.value = false;
@@ -880,6 +946,14 @@ async function onOpenSupport() {
     await open(GITHUB_SUPPORT_URL);
   } catch (error) {
     setStatus('error', `打开支持作者页面失败: ${String(error)}`);
+  }
+}
+
+async function onOpenPrivacy() {
+  try {
+    await open(GITHUB_PRIVACY_URL);
+  } catch (error) {
+    setStatus('error', `打开隐私说明失败: ${String(error)}`);
   }
 }
 
@@ -1004,6 +1078,18 @@ watch(
   font-weight: 700;
 }
 
+.settings-back-btn {
+  border-color: color-mix(in srgb, var(--primary) 20%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg-solid));
+  color: var(--primary);
+}
+
+.settings-back-btn:hover {
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg-solid));
+  color: var(--primary);
+}
+
 .settings-group {
   margin-bottom: 12px;
   overflow: hidden;
@@ -1126,6 +1212,128 @@ watch(
 .sync-status span:not(.sync-dot) {
   font-size: 11px;
   line-height: 14px;
+}
+
+.feishu-guide {
+  padding: 14px;
+}
+
+.feishu-guide-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.guide-copy {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.guide-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.guide-step {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: border 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.guide-step:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: color-mix(in srgb, var(--primary) 6%, var(--bg-solid));
+}
+
+.guide-step.done {
+  border-color: color-mix(in srgb, var(--accent-green) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent-green) 7%, var(--bg-solid));
+}
+
+.guide-step:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.guide-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.guide-step strong,
+.guide-step em {
+  display: block;
+  min-width: 0;
+}
+
+.guide-step strong {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.guide-step em {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 15px;
+  font-style: normal;
+}
+
+.guide-index {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.guide-step.done .guide-index {
+  background: var(--accent-green);
+}
+
+.guide-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  border-radius: 999px;
+  background: var(--bg-solid);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+  padding: 0 8px;
+}
+
+.guide-step.done .guide-status {
+  background: var(--accent-green-soft);
+  color: var(--accent-green);
+}
+
+.guide-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
 .form-hint {
