@@ -19,13 +19,11 @@ use tauri::{
   Emitter,
   menu::{Menu, MenuItem},
   tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-  AppHandle, LogicalPosition, LogicalSize, Manager, Position, Size, State, WebviewUrl, WebviewWindow,
-  WebviewWindowBuilder,
+  AppHandle, LogicalSize, Manager, Size, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 const MAIN_WINDOW_LABEL: &str = "main";
-const MENUBAR_WINDOW_LABEL: &str = "menubar";
 const QUICK_CAPTURE_WINDOW_LABEL: &str = "quick-capture";
 const NORMAL_WIDTH: f64 = 320.0;
 const NORMAL_HEIGHT: f64 = 500.0;
@@ -1004,31 +1002,6 @@ fn toggle_window_visibility(app: &AppHandle) -> tauri::Result<()> {
           mini_mode,
         },
       );
-    }
-  }
-  Ok(())
-}
-
-fn position_menubar_window(app: &AppHandle, window: &WebviewWindow) {
-  if let Ok(Some(monitor)) = app.primary_monitor() {
-    let pos = monitor.position();
-    let size = monitor.size();
-    let scale = monitor.scale_factor();
-    let x = pos.x as f64 / scale + size.width as f64 / scale - 340.0;
-    let y = pos.y as f64 / scale + 34.0;
-    let _ = window.set_position(Position::Logical(LogicalPosition { x, y }));
-  }
-}
-
-fn toggle_menubar_window(app: &AppHandle) -> tauri::Result<()> {
-  if let Some(window) = app.get_webview_window(MENUBAR_WINDOW_LABEL) {
-    if window.is_visible().unwrap_or(false) {
-      window.hide()?;
-    } else {
-      position_menubar_window(app, &window);
-      window.show()?;
-      window.set_focus()?;
-      let _ = window.emit("menubar-opened", ());
     }
   }
   Ok(())
@@ -2594,7 +2567,11 @@ fn init_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ..
       } = event
       {
-        let _ = toggle_menubar_window(&app_for_tray);
+        if let Some(window) = app_for_tray.get_webview_window(MAIN_WINDOW_LABEL) {
+          let _ = window.unminimize();
+          let _ = window.show();
+          let _ = window.set_focus();
+        }
       }
     });
 
@@ -2603,23 +2580,6 @@ fn init_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn create_system_windows(app: &mut tauri::App) -> tauri::Result<()> {
-  if app.get_webview_window(MENUBAR_WINDOW_LABEL).is_none() {
-    WebviewWindowBuilder::new(
-      app,
-      MENUBAR_WINDOW_LABEL,
-      WebviewUrl::App("index.html?window=menubar".into()),
-    )
-    .title("")
-    .inner_size(320.0, 420.0)
-    .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .visible(false)
-    .skip_taskbar(true)
-    .always_on_top(true)
-    .build()?;
-  }
-
   if app.get_webview_window(QUICK_CAPTURE_WINDOW_LABEL).is_none() {
     WebviewWindowBuilder::new(
       app,

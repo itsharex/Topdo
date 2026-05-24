@@ -42,22 +42,82 @@
             </span>
             <span class="guide-status">{{ stepState.templateReady ? '已打开' : '打开' }}</span>
           </button>
-          <button type="button" class="guide-step" :class="{ done: bitableReady }" @click="openBitableStep">
-            <span class="guide-index">2</span>
-            <span>
-              <strong>粘贴表格链接并解析</strong>
-              <em>Topdo 会自动识别 App Token 和 Table ID</em>
-            </span>
-            <span class="guide-status">{{ bitableReady ? '已解析' : '填写' }}</span>
-          </button>
-          <button type="button" class="guide-step" :class="{ done: credentialReady }" @click="openCredentialStep">
-            <span class="guide-index">3</span>
-            <span>
-              <strong>填写飞书应用凭证</strong>
-              <em>需要 App ID 和 App Secret，不会上传到作者服务器</em>
-            </span>
-            <span class="guide-status">{{ credentialReady ? '已填写' : '填写' }}</span>
-          </button>
+          <div class="guide-step-block" :class="{ open: bitableExpanded }">
+            <button type="button" class="guide-step" :class="{ done: bitableReady }" @click="openBitableStep">
+              <span class="guide-index">2</span>
+              <span>
+                <strong>粘贴表格链接并解析</strong>
+                <em>Topdo 会自动识别 App Token 和 Table ID</em>
+              </span>
+              <span class="guide-status">{{ bitableReady ? '已解析' : '填写' }}</span>
+            </button>
+            <Transition name="expand">
+              <div v-if="bitableExpanded" class="guide-step-panel">
+                <div class="expand-inner">
+                  <label class="form-group">
+                    <span class="form-label">多维表格链接</span>
+                    <div class="form-row">
+                      <input
+                        v-model="form.bitableUrl"
+                        type="text"
+                        class="form-input"
+                        placeholder="https://xxx.feishu.cn/base/..."
+                        @blur="parseBitableUrl(true)"
+                      />
+                      <button type="button" class="btn secondary compact" @click="parseBitableUrl(false)">解析</button>
+                    </div>
+                    <span class="form-hint">自动提取 base 后的 App Token 和 table 参数。</span>
+                  </label>
+                  <div class="form-row two-col">
+                    <label class="form-group">
+                      <span class="form-label">App Token</span>
+                      <input v-model="form.appToken" type="text" class="form-input mono" placeholder="Base Token" />
+                    </label>
+                    <label class="form-group">
+                      <span class="form-label">Table ID</span>
+                      <input v-model="form.tableId" type="text" class="form-input mono" placeholder="tbl..." />
+                    </label>
+                  </div>
+                  <div v-if="stepState.linkParsed" class="parse-result">
+                    <Icon name="check-circle" :size="15" /> 已识别 App Token 和 Table ID
+                  </div>
+                  <div class="btn-row">
+                    <button type="button" class="btn ghost" @click="onCancelBitableEdit">取消</button>
+                    <button type="button" class="btn primary" :disabled="busy" @click="onSaveSection('bitable')">保存并收起</button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </div>
+          <div class="guide-step-block" :class="{ open: credentialExpanded }">
+            <button type="button" class="guide-step" :class="{ done: credentialReady }" @click="openCredentialStep">
+              <span class="guide-index">3</span>
+              <span>
+                <strong>填写飞书应用凭证</strong>
+                <em>需要 App ID 和 App Secret，不会上传到作者服务器</em>
+              </span>
+              <span class="guide-status">{{ credentialReady ? '已填写' : '填写' }}</span>
+            </button>
+            <Transition name="expand">
+              <div v-if="credentialExpanded" class="guide-step-panel">
+                <div class="expand-inner">
+                  <label class="form-group">
+                    <span class="form-label">App ID</span>
+                    <input v-model="form.appId" type="text" class="form-input mono" placeholder="cli_xxx" />
+                  </label>
+                  <label class="form-group">
+                    <span class="form-label">App Secret</span>
+                    <input v-model="form.appSecret" type="password" class="form-input mono" placeholder="留空表示保留已保存的 Secret" />
+                    <span class="form-hint">Secret 保存后由本地配置管理，不在页面明文展示。</span>
+                  </label>
+                  <div class="btn-row">
+                    <button type="button" class="btn ghost" @click="onCancelCredentialEdit">取消</button>
+                    <button type="button" class="btn primary" :disabled="busy" @click="onSaveSection('credential')">保存并收起</button>
+                  </div>
+                </div>
+              </div>
+            </Transition>
+          </div>
           <button type="button" class="guide-step" :class="{ done: stepState.connectionReady }" :disabled="busy" @click="onTestConnection">
             <span class="guide-index">4</span>
             <span>
@@ -71,87 +131,18 @@
           <button type="button" class="btn ghost compact" @click="onOpenTutorialLink">查看配置教程</button>
           <button type="button" class="btn ghost compact" @click="showLogs = !showLogs">{{ showLogs ? '隐藏日志' : '查看同步日志' }}</button>
         </div>
-      </section>
-
-      <section class="settings-group">
-        <div class="setting-row clickable" @click="bitableExpanded = !bitableExpanded">
-          <span class="setting-icon blue"><Icon name="link" :size="18" /></span>
-          <div class="setting-text">
-            <p class="setting-name">多维表格信息</p>
-          </div>
-          <Icon class="setting-arrow" :class="{ open: bitableExpanded }" name="chevron-right" :size="17" />
-        </div>
         <Transition name="expand">
-          <div v-if="bitableExpanded" class="expand-section">
-            <div class="expand-inner">
-              <div class="expand-title"><span class="step">1</span> 粘贴并解析多维表格链接</div>
-              <label class="form-group">
-                <span class="form-label">多维表格链接</span>
-                <div class="form-row">
-                  <input
-                    v-model="form.bitableUrl"
-                    type="text"
-                    class="form-input"
-                    placeholder="https://xxx.feishu.cn/base/..."
-                    @blur="parseBitableUrl(true)"
-                  />
-                  <button type="button" class="btn secondary compact" @click="parseBitableUrl(false)">解析</button>
-                </div>
-                <span class="form-hint">自动提取 base 后的 App Token 和 table 参数。</span>
-              </label>
-              <div class="form-row two-col">
-                <label class="form-group">
-                  <span class="form-label">App Token</span>
-                  <input v-model="form.appToken" type="text" class="form-input mono" placeholder="Base Token" />
-                </label>
-                <label class="form-group">
-                  <span class="form-label">Table ID</span>
-                  <input v-model="form.tableId" type="text" class="form-input mono" placeholder="tbl..." />
-                </label>
-              </div>
-              <div v-if="stepState.linkParsed" class="parse-result">
-                <Icon name="check-circle" :size="15" /> 已识别 App Token 和 Table ID
-              </div>
-              <div class="btn-row">
-                <button type="button" class="btn secondary" @click="onOpenTemplateLink">打开模板</button>
-                <button type="button" class="btn ghost" @click="onCancelBitableEdit">取消</button>
-                <button type="button" class="btn primary" :disabled="busy" @click="onSaveSection('bitable')">保存并收起</button>
+          <div v-if="showLogs" class="logs-panel guide-logs-panel">
+            <div class="logs-header">
+              <span>最近 {{ logs.length }} / 50 条</span>
+              <div>
+                <button type="button" class="btn ghost compact" @click="onClearLogs">清除</button>
+                <button type="button" class="btn ghost compact" @click="onCopyLogs">复制</button>
               </div>
             </div>
-          </div>
-        </Transition>
-
-        <div class="setting-row clickable" @click="credentialExpanded = !credentialExpanded">
-          <span class="setting-icon blue"><Icon name="key" :size="18" /></span>
-          <div class="setting-text">
-            <p class="setting-name">飞书应用凭证</p>
-          </div>
-          <span v-if="hasSavedSecret" class="encrypted-badge"><Icon name="lock" :size="12" /> 已加密</span>
-          <Icon class="setting-arrow" :class="{ open: credentialExpanded }" name="chevron-right" :size="17" />
-        </div>
-        <Transition name="expand">
-          <div v-if="credentialExpanded" class="expand-section">
-            <div class="expand-inner">
-              <div class="expand-title"><span class="step">2</span> 填写应用凭证</div>
-              <label class="form-group">
-                <span class="form-label">App ID</span>
-                <input v-model="form.appId" type="text" class="form-input mono" placeholder="cli_xxx" />
-              </label>
-              <label class="form-group">
-                <span class="form-label">App Secret</span>
-                <input v-model="form.appSecret" type="password" class="form-input mono" placeholder="留空表示保留已保存的 Secret" />
-                <span class="form-hint">Secret 保存后由本地配置管理，不在页面明文展示。</span>
-              </label>
-              <div class="annotation">
-                <Icon name="info" :size="15" />
-                <span>在飞书开放平台创建企业自建应用，即可获取 App ID 和 App Secret。</span>
-                <button type="button" class="text-link" @click="onOpenTutorialLink">打开教程</button>
-              </div>
-              <div class="btn-row">
-                <button type="button" class="btn secondary" :disabled="busy" @click="onTestConnection">测试连接</button>
-                <button type="button" class="btn ghost" @click="onCancelCredentialEdit">取消</button>
-                <button type="button" class="btn primary" :disabled="busy" @click="onSaveSection('credential')">保存并收起</button>
-              </div>
+            <div class="task-scrollbar logs-list">
+              <p v-for="(entry, idx) in logs" :key="`${entry.timestamp}-${entry.tag}-${idx}`">{{ formatLogLine(entry) }}</p>
+              <p v-if="logs.length === 0" class="empty-log">暂无日志</p>
             </div>
           </div>
         </Transition>
@@ -329,21 +320,6 @@
       <button type="button" class="btn ghost" :disabled="busy" @click="$emit('back')">返回</button>
     </div>
 
-    <Transition name="expand">
-      <div v-if="showLogs" class="logs-panel">
-        <div class="logs-header">
-          <span>最近 {{ logs.length }} / 50 条</span>
-          <div>
-            <button type="button" class="btn ghost compact" @click="onClearLogs">清除</button>
-            <button type="button" class="btn ghost compact" @click="onCopyLogs">复制</button>
-          </div>
-        </div>
-        <div class="task-scrollbar logs-list">
-          <p v-for="(entry, idx) in logs" :key="`${entry.timestamp}-${entry.tag}-${idx}`">{{ formatLogLine(entry) }}</p>
-          <p v-if="logs.length === 0" class="empty-log">暂无日志</p>
-        </div>
-      </div>
-    </Transition>
   </section>
 </template>
 
@@ -753,13 +729,15 @@ function onOpenTutorialLink() {
 }
 
 function openBitableStep() {
-  bitableExpanded.value = true;
-  credentialExpanded.value = false;
+  const nextOpen = !bitableExpanded.value;
+  bitableExpanded.value = nextOpen;
+  if (nextOpen) credentialExpanded.value = false;
 }
 
 function openCredentialStep() {
-  credentialExpanded.value = true;
-  bitableExpanded.value = false;
+  const nextOpen = !credentialExpanded.value;
+  credentialExpanded.value = nextOpen;
+  if (nextOpen) bitableExpanded.value = false;
 }
 
 async function loadConfig() {
@@ -1327,6 +1305,34 @@ watch(
 .guide-step.done .guide-status {
   background: var(--accent-green-soft);
   color: var(--accent-green);
+}
+
+.guide-step-block {
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.guide-step-block.open {
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border-light));
+  background: var(--bg-solid);
+}
+
+.guide-step-block.open .guide-step {
+  border: 0;
+  border-bottom: 1px solid var(--border-light);
+  border-radius: 0;
+}
+
+.guide-step-block.open .guide-step.done {
+  border-bottom-color: color-mix(in srgb, var(--accent-green) 22%, var(--border-light));
+}
+
+.guide-step-panel {
+  background: var(--bg-solid);
+}
+
+.guide-step-panel .expand-inner {
+  padding: 12px;
 }
 
 .guide-actions {
