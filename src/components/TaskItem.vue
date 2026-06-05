@@ -73,7 +73,9 @@
           placeholder="请输入任务名称"
           @click.stop
           @blur="handleInlineEditBlur"
-          @keydown.enter.prevent="commitInlineEdit"
+          @compositionstart="isInlineNameComposing = true"
+          @compositionend="isInlineNameComposing = false"
+          @keydown.enter="onInlineNameEnter"
           @keydown.esc.prevent="cancelInlineEdit"
         />
         <p v-else class="task-name" :title="task.name || '未命名任务'">
@@ -82,13 +84,21 @@
             <span v-else>{{ segment.text }}</span>
           </template>
         </p>
-        <div v-if="!inlineEditing && (dueDateInfo || recurrenceText || subTaskTotal > 0)" class="task-meta-line">
+        <div v-if="!inlineEditing && (dueDateInfo || recurrenceText || subTaskTotal > 0 || taskTags.length)" class="task-meta-line">
           <span v-if="recurrenceText" class="badge badge-recurring">
             <Icon name="recurring" :size="11" />
             <span>{{ recurrenceText }}</span>
           </span>
           <span v-if="dueDateInfo" class="badge" :class="dueDateInfo.tone === 'overdue' ? 'badge-overdue' : 'badge-due'">{{ dueDateInfo.label }}</span>
           <span v-if="subTaskTotal > 0" class="subtask-progress">{{ subTaskDone }}/{{ subTaskTotal }}</span>
+          <span
+            v-for="tag in taskTags.slice(0, 3)"
+            :key="tag"
+            class="task-tag"
+          >
+            {{ tag }}
+          </span>
+          <span v-if="taskTags.length > 3" class="task-tag task-tag-more">+{{ taskTags.length - 3 }}</span>
         </div>
       </button>
 
@@ -148,7 +158,9 @@
               class="detail-name-input"
               placeholder="请输入任务名称"
               @blur="handleNameBlur"
-              @keydown.enter.prevent="saveDetailDrafts"
+              @compositionstart="isDetailNameComposing = true"
+              @compositionend="isDetailNameComposing = false"
+              @keydown.enter="onDetailNameEnter"
               @keydown.esc.prevent="cancelNameEdit"
             />
             <div class="input-divider" aria-hidden="true"></div>
@@ -182,6 +194,37 @@
             <div class="detail-option-content">
               <span class="detail-option-label">优先级</span>
               <ChipSelector v-model="priorityDraft" :options="priorityChipOptions" :tone="priorityChipTone" @update:model-value="onPriorityChipUpdate" />
+            </div>
+          </section>
+
+          <section class="detail-option-row detail-option-row--stack">
+            <div class="detail-option-icon detail-option-icon--cyan"><Icon name="tag" :size="17" /></div>
+            <div class="detail-option-content">
+              <span class="detail-option-label">标签</span>
+              <div class="detail-tags">
+                <button
+                  v-for="tag in tagOptions"
+                  :key="tag"
+                  type="button"
+                  class="detail-tag-chip"
+                  :class="{ selected: tagsDraft.includes(tag) }"
+                  @click="toggleTag(tag)"
+                >
+                  {{ tag }}
+                </button>
+                <p v-if="!tagOptions.length" class="tag-empty-hint">输入后会保留最近 5 个标签</p>
+              </div>
+              <div class="detail-tag-input-row">
+                <input
+                  v-model="tagDraft"
+                  type="text"
+                  placeholder="自定义标签，回车添加"
+                  @compositionstart="isTagComposing = true"
+                  @compositionend="isTagComposing = false"
+                  @keydown.enter="onTagInputEnter"
+                />
+                <button type="button" @click="addTagDraft">添加</button>
+              </div>
             </div>
           </section>
 
@@ -225,7 +268,9 @@
                       placeholder="子任务名称"
                       @input="markSubTasksDirty"
                       @change="normalizeSubTaskText(item.id)"
-                      @keydown.enter.prevent="normalizeSubTaskText(item.id)"
+                      @compositionstart="isSubTaskComposing = true"
+                      @compositionend="isSubTaskComposing = false"
+                      @keydown.enter="onExistingSubTaskEnter($event, item.id)"
                     />
                     <button type="button" class="detail-subtask-delete" title="删除子任务" @click="deleteSubTask(item.id)">×</button>
                   </li>
@@ -236,7 +281,9 @@
                     v-model.trim="newSubTaskText"
                     type="text"
                     placeholder="添加子任务，回车确认"
-                    @keydown.enter.prevent="addSubTask"
+                    @compositionstart="isNewSubTaskComposing = true"
+                    @compositionend="isNewSubTaskComposing = false"
+                    @keydown.enter="onNewSubTaskEnter"
                   />
                 </div>
               </div>
@@ -283,6 +330,7 @@ import { useTaskStore } from '../stores/taskStore';
 import type { SyncState } from '../stores/taskStore';
 import type { RecurrenceRule, SubTask, Task } from '../types';
 import { buildDueDateValue, formatDueDate as formatDueDateLabel, splitDueDate } from '../utils/dueDate';
+import { isImeComposing } from '../utils/keyboard';
 import { recurrenceLabel } from '../utils/recurrence';
 import Icon from './Icon.vue';
 import RecurrencePanel from './RecurrencePanel.vue';
@@ -319,7 +367,10 @@ const dueTimeDraft = ref(initialDueParts.time);
 const recurrenceDraft = ref<RecurrenceRule | null>(props.task.recurrence_rule || null);
 const reminderDraft = ref<number | null>(props.task.reminder_before ?? null);
 const subTasksDraft = ref<SubTask[]>(cloneSubTasks(props.task.sub_tasks));
+const tagsDraft = ref<string[]>(normalizeTags(props.task.tags));
+const tagDraft = ref('');
 const subTasksDirty = ref(false);
+const tagsDirty = ref(false);
 const isEditingDate = ref(false);
 const selectedDateOption = ref<string | number | null>(initialDueParts.date || null);
 const statusAnimating = ref(false);
@@ -327,6 +378,11 @@ const menuVisible = ref(false);
 const menuX = ref(0);
 const menuY = ref(0);
 const nameSaving = ref(false);
+const isInlineNameComposing = ref(false);
+const isDetailNameComposing = ref(false);
+const isTagComposing = ref(false);
+const isSubTaskComposing = ref(false);
+const isNewSubTaskComposing = ref(false);
 let inlineBlurTimer: ReturnType<typeof setTimeout> | null = null;
 const priorityOptions = [
   { value: '普通', label: '普通', color: '#C7C7CC', tone: 'normal' },
@@ -346,7 +402,9 @@ const dateOptions: ChipOption[] = [
   { value: 'custom', label: '选择日期' }
 ];
 const searchQueryTrimmed = computed(() => store.searchQuery.trim());
+const tagOptions = computed(() => mergeTagOptions(store.recentTags, tagsDraft.value));
 const subTasks = computed(() => subTasksDraft.value);
+const taskTags = computed(() => normalizeTags(props.task.tags));
 const subTaskTotal = computed(() => subTasks.value.length);
 const subTaskDone = computed(() => subTasks.value.filter((item) => item.done).length);
 const subTaskProgress = computed(() => subTaskTotal.value ? Math.round((subTaskDone.value / subTaskTotal.value) * 100) : 0);
@@ -454,6 +512,43 @@ function cloneSubTasks(value: SubTask[] | undefined): SubTask[] {
   return (value || []).map((item) => ({ ...item }));
 }
 
+function normalizeTags(value: unknown): string[] {
+  const parsed = typeof value === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value.split(/[，,\s]+/);
+        }
+      })()
+    : value;
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  return parsed
+    .map((item) => String(item || '').trim().replace(/^#/, '').slice(0, 16))
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
+}
+
+function mergeTagOptions(...groups: unknown[]): string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const tag of groups.flatMap((group) => normalizeTags(group))) {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push(tag);
+    if (options.length >= 5) break;
+  }
+  return options;
+}
+
 watch(
   () => props.task.notes,
   (next) => {
@@ -515,6 +610,15 @@ watch(
   (next) => {
     if (subTasksDirty.value) return;
     subTasksDraft.value = cloneSubTasks(next);
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.task.tags,
+  (next) => {
+    if (tagsDirty.value) return;
+    tagsDraft.value = normalizeTags(next);
   },
   { deep: true }
 );
@@ -679,6 +783,12 @@ function handleNameBlur(event: FocusEvent) {
   if (!nameDraft.value.trim()) cancelNameEdit();
 }
 
+function onDetailNameEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isDetailNameComposing.value)) return;
+  event.preventDefault();
+  void saveDetailDrafts();
+}
+
 function onTaskContentClick() {
   if (inlineEditing.value) return;
   expanded.value = !expanded.value;
@@ -741,12 +851,53 @@ async function commitInlineEdit() {
   }
 }
 
+function onInlineNameEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isInlineNameComposing.value)) return;
+  event.preventDefault();
+  void commitInlineEdit();
+}
+
 function onPrioritySelect(priority: string) {
   priorityDraft.value = priority;
 }
 
 function onPriorityChipUpdate(value: string | number | null) {
   if (typeof value === 'string') onPrioritySelect(value);
+}
+
+function addTag(value: string) {
+  const tag = value.trim().replace(/^#/, '').slice(0, 16);
+  if (!tag) return;
+  if (tagsDraft.value.some((item) => item.toLowerCase() === tag.toLowerCase())) return;
+  if (tagsDraft.value.length >= 5) return;
+  tagsDraft.value = [...tagsDraft.value, tag].slice(0, 5);
+  tagsDirty.value = true;
+}
+
+function addTagDraft() {
+  tagDraft.value
+    .split(/[，,\s]+/)
+    .forEach((tag) => addTag(tag));
+  tagDraft.value = '';
+}
+
+function toggleTag(tag: string) {
+  if (tagsDraft.value.includes(tag)) {
+    removeTag(tag);
+    return;
+  }
+  addTag(tag);
+}
+
+function removeTag(tag: string) {
+  tagsDraft.value = tagsDraft.value.filter((item) => item !== tag);
+  tagsDirty.value = true;
+}
+
+function onTagInputEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isTagComposing.value)) return;
+  event.preventDefault();
+  addTagDraft();
 }
 
 function onDueDateChange() {
@@ -820,6 +971,18 @@ function normalizeSubTaskText(id: string) {
   subTasksDirty.value = true;
 }
 
+function onExistingSubTaskEnter(event: KeyboardEvent, id: string) {
+  if (isImeComposing(event, isSubTaskComposing.value)) return;
+  event.preventDefault();
+  normalizeSubTaskText(id);
+}
+
+function onNewSubTaskEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isNewSubTaskComposing.value)) return;
+  event.preventDefault();
+  addSubTask();
+}
+
 function deleteSubTask(id: string) {
   subTasksDraft.value = subTasks.value.filter((item) => item.id !== id);
   subTasksDirty.value = true;
@@ -864,6 +1027,7 @@ function handleBack() {
 async function saveDetailDrafts() {
   try {
     addSubTask();
+    addTagDraft();
     await store.updateTaskDetails(props.task.record_id, {
       name: nameDraft.value,
       priority: priorityDraft.value,
@@ -871,10 +1035,13 @@ async function saveDetailDrafts() {
       recurrence_rule: recurrenceDraft.value,
       reminder_before: reminderDraft.value,
       sub_tasks: subTasks.value,
+      tags: tagsDraft.value,
       notes: notesDraft.value
     });
     subTasksDraft.value = cloneSubTasks(subTasks.value);
     subTasksDirty.value = false;
+    tagsDraft.value = normalizeTags(tagsDraft.value);
+    tagsDirty.value = false;
     expanded.value = false;
   } catch (error) {
     emit('error', `任务保存失败：${String(error)}`);
@@ -901,6 +1068,7 @@ async function duplicateTask() {
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         done: false
       })),
+      tags: tagsDraft.value,
       due_date: props.task.due_date || '',
       recurrence_rule: props.task.recurrence_rule || null,
       reminder_before: props.task.reminder_before ?? null
@@ -1145,6 +1313,17 @@ defineExpose({
 .subtask-progress {
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+.task-tag {
+  max-width: 72px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  color: var(--accent-cyan);
+  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-solid));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-name-inline-input {
@@ -1730,6 +1909,72 @@ defineExpose({
   min-height: 22px;
   padding: 4px 9px;
   font-size: 11px;
+}
+
+.detail-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.detail-tag-chip {
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.detail-tag-chip.selected {
+  color: var(--accent-cyan);
+  border-color: color-mix(in srgb, var(--accent-cyan) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-solid));
+}
+
+.tag-empty-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.detail-tag-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.detail-tag-input-row input {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  outline: none;
+}
+
+.detail-tag-input-row input:focus {
+  border-color: var(--accent-cyan);
+}
+
+.detail-tag-input-row button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cyan) 35%, var(--border));
+  border-radius: 9px;
+  background: var(--bg-solid);
+  color: var(--accent-cyan);
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .task-detail-panel :deep(.recurrence-panel),

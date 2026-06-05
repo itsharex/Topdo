@@ -27,6 +27,7 @@ interface TaskState {
   filter: TaskFilter;
   searchQuery: string;
   searchOpen: boolean;
+  recentTags: string[];
   tasks: Task[];
   loading: boolean;
   isSyncing: boolean;
@@ -47,6 +48,7 @@ interface CreateTaskInput {
   status?: string;
   notes?: string;
   sub_tasks?: SubTask[];
+  tags?: string[];
   due_date?: string;
   recurrence_rule?: Task['recurrence_rule'];
   recurrence_parent_id?: string;
@@ -56,6 +58,9 @@ interface CreateTaskInput {
 
 const FEISHU_RECORDS_URL = '/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records';
 const FEISHU_UPDATE_URL = '/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/{record_id}';
+const RECENT_TAGS_STORAGE_KEY = 'topdo_recent_task_tags_v1';
+const MAX_TASK_TAGS = 5;
+const MAX_RECENT_TAGS = 5;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 const localStatusSaveQueue = new Map<string, Promise<void>>();
 
@@ -180,12 +185,64 @@ function normalizeSubTasks(value: unknown): SubTask[] {
     .filter((item) => item.id && item.text.trim());
 }
 
+function normalizeTagList(value: unknown, limit: number): string[] {
+  const parsed = typeof value === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(value);
+        } catch {
+          return value.split(/[，,\s]+/);
+        }
+      })()
+    : value;
+
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  return parsed
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function normalizeTags(value: unknown): string[] {
+  return normalizeTagList(value, MAX_TASK_TAGS);
+}
+
+function normalizeRecentTags(value: unknown): string[] {
+  return normalizeTagList(value, MAX_RECENT_TAGS);
+}
+
+function loadRecentTags(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    return normalizeRecentTags(window.localStorage.getItem(RECENT_TAGS_STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function persistRecentTags(tags: string[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(RECENT_TAGS_STORAGE_KEY, JSON.stringify(normalizeRecentTags(tags)));
+  } catch {
+    // Ignore storage failures; tag editing should not be blocked by localStorage.
+  }
+}
+
 function normalizeTask(task: Task): Task {
   return {
     ...task,
     priority: normalizePriority(task.priority || '普通'),
     sort_order: Number(task.sort_order || 0),
     sub_tasks: normalizeSubTasks((task as any).sub_tasks),
+    tags: normalizeTags((task as any).tags),
     due_date: String((task as any).due_date || ''),
     recurrence_rule: parseRecurrenceRule((task as any).recurrence_rule),
     recurrence_parent_id: String((task as any).recurrence_parent_id || ''),
@@ -265,7 +322,8 @@ function applySearchFilter(tasks: Task[], searchQuery: string): Task[] {
   return tasks.filter((task) => {
     const name = (task.name || '').toLowerCase();
     const notes = (task.notes || '').toLowerCase();
-    return name.includes(query) || notes.includes(query);
+    const tags = normalizeTags((task as any).tags).join(' ').toLowerCase();
+    return name.includes(query) || notes.includes(query) || tags.includes(query);
   });
 }
 
@@ -277,6 +335,7 @@ export const useTaskStore = defineStore('task', {
     filter: 'pending',
     searchQuery: '',
     searchOpen: false,
+    recentTags: loadRecentTags(),
     tasks: [],
     loading: false,
     isSyncing: false,
@@ -431,6 +490,13 @@ export const useTaskStore = defineStore('task', {
       this.closeSearch();
     },
 
+    rememberTags(tags: unknown) {
+      const normalized = normalizeTags(tags);
+      if (!normalized.length) return;
+      this.recentTags = normalizeRecentTags([...normalized, ...this.recentTags]);
+      persistRecentTags(this.recentTags);
+    },
+
     setModeState(mode: AppMode) {
       this.mode = mode;
       console.log('[Store] mode 变更为:', mode);
@@ -472,7 +538,9 @@ export const useTaskStore = defineStore('task', {
           id: target.id || target.record_id,
           fields
         });
-        this.setTaskPatch(recordId, normalizeTask(updated));
+        const normalized = normalizeTask(updated);
+        this.setTaskPatch(recordId, normalized);
+        return normalized;
       } catch (error) {
         this.setTaskPatch(recordId, previous);
         throw error;
@@ -486,6 +554,19 @@ export const useTaskStore = defineStore('task', {
         { sub_tasks: normalized },
         { sub_tasks: JSON.stringify(normalized) }
       );
+    },
+
+    async updateTaskTags(recordId: string, tags: string[]) {
+      const normalized = normalizeTags(tags);
+      const updated = await this.updateTaskLocalFields(
+        recordId,
+        { tags: normalized },
+        { tags: JSON.stringify(normalized) }
+      );
+      this.rememberTags(normalized);
+      if (updated.sync_status === 'pending') {
+        this.scheduleSyncAfterWrite();
+      }
     },
 
     async updateTaskDueDate(recordId: string, dueDate: string) {
@@ -520,6 +601,7 @@ export const useTaskStore = defineStore('task', {
       const fields: Record<string, string> = {};
       const patch: Partial<Task> = {};
       let remoteAffectingChanged = false;
+      let tagsForRecent: string[] | null = null;
 
       if (input.name !== undefined) {
         const name = input.name.trim();
@@ -557,6 +639,15 @@ export const useTaskStore = defineStore('task', {
         if (JSON.stringify(subTasks) !== JSON.stringify(normalizeSubTasks(target.sub_tasks || []))) {
           fields.sub_tasks = JSON.stringify(subTasks);
           patch.sub_tasks = subTasks;
+        }
+      }
+      if (input.tags !== undefined) {
+        const tags = normalizeTags(input.tags);
+        if (JSON.stringify(tags) !== JSON.stringify(normalizeTags(target.tags || []))) {
+          fields.tags = JSON.stringify(tags);
+          patch.tags = tags;
+          tagsForRecent = tags;
+          remoteAffectingChanged = true;
         }
       }
       if (input.recurrence_rule !== undefined) {
@@ -598,6 +689,9 @@ export const useTaskStore = defineStore('task', {
         this.tasks = sortTasksByPolicy(this.tasks);
         if (remoteAffectingChanged) {
           this.scheduleSyncAfterWrite();
+        }
+        if (tagsForRecent) {
+          this.rememberTags(tagsForRecent);
         }
       } catch (error) {
         this.setTaskPatch(recordId, previous);
@@ -1242,6 +1336,7 @@ export const useTaskStore = defineStore('task', {
       const dueDate = (taskInput.due_date || '').trim();
       const notes = (taskInput.notes || '').trim();
       const subTasks = normalizeSubTasks(taskInput.sub_tasks || []);
+      const tags = normalizeTags(taskInput.tags || []);
       const recurrenceRule = taskInput.recurrence_rule || null;
       const recurrenceParentId = (taskInput.recurrence_parent_id || '').trim();
       const recurrenceIndex = taskInput.recurrence_index ?? null;
@@ -1280,6 +1375,10 @@ export const useTaskStore = defineStore('task', {
           patch.sub_tasks = subTasks;
           fields.sub_tasks = JSON.stringify(subTasks);
         }
+        if (tags.length) {
+          patch.tags = tags;
+          fields.tags = JSON.stringify(tags);
+        }
         if (recurrenceRule) {
           patch.recurrence_rule = recurrenceRule;
           fields.recurrence_rule = JSON.stringify(recurrenceRule);
@@ -1302,6 +1401,7 @@ export const useTaskStore = defineStore('task', {
               patch,
               fields
             );
+            this.rememberTags(tags);
           } catch (error) {
             this.tasks = this.tasks.filter((task) => task.record_id !== normalizedCreated.record_id);
             try {
@@ -1312,6 +1412,9 @@ export const useTaskStore = defineStore('task', {
             log('API', '本地新任务附加字段保存失败', { error: String(error) });
             throw error;
           }
+        }
+        if (!Object.keys(fields).length) {
+          this.rememberTags(tags);
         }
         return created.record_id;
       }
@@ -1331,6 +1434,7 @@ export const useTaskStore = defineStore('task', {
         notes: '',
         sort_order: 0,
         sub_tasks: subTasks,
+        tags,
         due_date: dueDate,
         recurrence_rule: recurrenceRule,
         recurrence_parent_id: recurrenceParentId,
@@ -1400,9 +1504,10 @@ export const useTaskStore = defineStore('task', {
           localPatch.due_date = dueDate;
           localFields.due_date = dueDate;
         }
-        if (notes || subTasks.length || recurrenceRule || recurrenceParentId || recurrenceIndex || reminderBefore !== null) {
+        if (notes || subTasks.length || tags.length || recurrenceRule || recurrenceParentId || recurrenceIndex || reminderBefore !== null) {
           localPatch.notes = notes;
           localPatch.sub_tasks = subTasks;
+          localPatch.tags = tags;
           localPatch.recurrence_rule = recurrenceRule;
           localPatch.recurrence_parent_id = recurrenceParentId;
           localPatch.recurrence_index = recurrenceIndex;
@@ -1410,6 +1515,7 @@ export const useTaskStore = defineStore('task', {
           localPatch.reminder_notified = false;
           localFields.notes = notes;
           localFields.sub_tasks = JSON.stringify(subTasks);
+          localFields.tags = JSON.stringify(tags);
           localFields.recurrence_rule = recurrenceRule ? JSON.stringify(recurrenceRule) : '';
           localFields.recurrence_parent_id = recurrenceParentId;
           localFields.recurrence_index = recurrenceIndex === null ? '' : String(recurrenceIndex);
@@ -1418,10 +1524,17 @@ export const useTaskStore = defineStore('task', {
         }
         if (Object.keys(localFields).length > 0) {
           try {
-            await this.updateTaskLocalFields(result.record_id, localPatch, localFields);
+            const updated = await this.updateTaskLocalFields(result.record_id, localPatch, localFields);
+            this.rememberTags(tags);
+            if (updated.sync_status === 'pending') {
+              this.scheduleSyncAfterWrite();
+            }
           } catch (error) {
             log('API', '飞书新任务本地附加字段保存失败', { error: String(error) });
           }
+        }
+        if (!Object.keys(localFields).length) {
+          this.rememberTags(tags);
         }
         if (!result.synced) {
           this.scheduleSyncAfterWrite();

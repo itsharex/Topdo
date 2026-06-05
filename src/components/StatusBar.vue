@@ -6,7 +6,7 @@
         <span>本地模式 | 共 {{ taskCount }} 条任务</span>
         <button type="button" class="shortcut-btn" title="快捷键" @click="$emit('open-shortcuts')">⌘K 快捷键</button>
       </div>
-      <span class="status-right">Topdo v2.0.2</span>
+      <span class="status-right">Topdo v2.1.0</span>
     </template>
 
     <template v-else>
@@ -20,12 +20,11 @@
         <span class="sync-indicator" :class="offlineMode ? 'warn' : ''"></span>
         <span v-if="offlineMode">离线模式</span>
         <span v-else>上次同步：{{ lastSyncText }}</span>
-        <span v-if="pendingCount > 0" class="meta-pill">待同步 {{ pendingCount }}</span>
         <span v-if="failedCount > 0" class="meta-pill danger">失败 {{ failedCount }}</span>
         <button type="button" class="shortcut-btn" title="快捷键" @click="$emit('open-shortcuts')">⌘K 快捷键</button>
       </div>
       <span class="status-right" :title="lastSyncErrorSummary || ''">
-        {{ failedCount > 0 && lastSyncErrorSummary ? '同步异常' : 'Topdo v2.0.2' }}
+        {{ failedCount > 0 && lastSyncErrorSummary ? '同步异常' : 'Topdo v2.1.0' }}
       </span>
     </template>
   </footer>

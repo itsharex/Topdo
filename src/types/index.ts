@@ -28,6 +28,7 @@ export interface Task {
   notes: string;
   sort_order?: number;
   sub_tasks?: SubTask[];
+  tags?: string[];
   due_date?: string;
   recurrence_rule?: RecurrenceRule | null;
   recurrence_parent_id?: string | null;

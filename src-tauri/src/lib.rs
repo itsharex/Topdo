@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     notes TEXT DEFAULT '',
     sort_order INTEGER DEFAULT 0,
     sub_tasks TEXT DEFAULT '[]',
+    tags TEXT DEFAULT '[]',
     due_date TEXT DEFAULT '',
     source TEXT DEFAULT 'local',
     feishu_record_id TEXT DEFAULT '',
@@ -330,6 +331,7 @@ struct Task {
   notes: String,
   sort_order: i64,
   sub_tasks: String,
+  tags: String,
   due_date: String,
   recurrence_rule: String,
   recurrence_parent_id: String,
@@ -595,6 +597,9 @@ fn normalize_task(mut task: Task) -> Task {
   if task.sub_tasks.trim().is_empty() {
     task.sub_tasks = "[]".to_string();
   }
+  if task.tags.trim().is_empty() {
+    task.tags = "[]".to_string();
+  }
   if task.recurrence_rule.trim().is_empty() {
     task.recurrence_rule = String::new();
   }
@@ -630,6 +635,66 @@ fn to_feishu_priority_value(priority: &str) -> String {
   }
 }
 
+fn normalize_tag_values(raw: &str) -> Vec<String> {
+  let parsed = serde_json::from_str::<Vec<String>>(raw).ok();
+  let values = parsed.unwrap_or_else(|| {
+    raw
+      .split(|c: char| c == ',' || c == '，' || c.is_whitespace())
+      .map(|item| item.to_string())
+      .collect()
+  });
+  let mut seen = Vec::<String>::new();
+  for item in values {
+    let tag = item.trim().trim_start_matches('#').chars().take(16).collect::<String>();
+    if tag.is_empty() {
+      continue;
+    }
+    if seen.iter().any(|existing| existing.eq_ignore_ascii_case(&tag)) {
+      continue;
+    }
+    seen.push(tag);
+    if seen.len() >= 5 {
+      break;
+    }
+  }
+  seen
+}
+
+fn idempotency_token(seed: &str) -> String {
+  let digest = Sha256::digest(seed.as_bytes());
+  let mut bytes = [0u8; 16];
+  bytes.copy_from_slice(&digest[..16]);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  format!(
+    "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+    bytes[0],
+    bytes[1],
+    bytes[2],
+    bytes[3],
+    bytes[4],
+    bytes[5],
+    bytes[6],
+    bytes[7],
+    bytes[8],
+    bytes[9],
+    bytes[10],
+    bytes[11],
+    bytes[12],
+    bytes[13],
+    bytes[14],
+    bytes[15]
+  )
+}
+
+fn feishu_tags_to_local_json(raw: &str) -> String {
+  serde_json::to_string(&normalize_tag_values(raw)).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn local_tags_to_feishu_text(raw: &str) -> String {
+  normalize_tag_values(raw).join(", ")
+}
+
 fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
   fn text(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<String> {
     Ok(row.get::<_, Option<String>>(index)?.unwrap_or_default())
@@ -656,19 +721,20 @@ fn task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     notes: text(row, 10)?,
     sort_order: row.get::<_, Option<i64>>(11)?.unwrap_or(0),
     sub_tasks: text_or(row, 12, "[]")?,
-    due_date: text(row, 13)?,
-    recurrence_rule: text(row, 14)?,
-    recurrence_parent_id: text(row, 15)?,
-    recurrence_index: row.get(16)?,
-    reminder_before: row.get(17)?,
-    reminder_notified: row.get::<_, Option<i64>>(18)?.unwrap_or(0) != 0,
-    source: text_or(row, 19, "local")?,
-    feishu_record_id: text(row, 20)?,
-    sync_status: text_or(row, 21, "synced")?,
-    last_synced_at: text(row, 22)?,
-    retry_count: row.get::<_, Option<i64>>(23)?.unwrap_or(0),
-    last_error: text(row, 24)?,
-    last_retry_at: text(row, 25)?,
+    tags: text_or(row, 13, "[]")?,
+    due_date: text(row, 14)?,
+    recurrence_rule: text(row, 15)?,
+    recurrence_parent_id: text(row, 16)?,
+    recurrence_index: row.get(17)?,
+    reminder_before: row.get(18)?,
+    reminder_notified: row.get::<_, Option<i64>>(19)?.unwrap_or(0) != 0,
+    source: text_or(row, 20, "local")?,
+    feishu_record_id: text(row, 21)?,
+    sync_status: text_or(row, 22, "synced")?,
+    last_synced_at: text(row, 23)?,
+    retry_count: row.get::<_, Option<i64>>(24)?.unwrap_or(0),
+    last_error: text(row, 25)?,
+    last_retry_at: text(row, 26)?,
   })
 }
 
@@ -709,6 +775,7 @@ fn open_db(path: &PathBuf) -> Result<Connection, String> {
   ensure_column(&conn, "tasks", "completed_at", "TEXT DEFAULT ''")?;
   ensure_column(&conn, "tasks", "sort_order", "INTEGER DEFAULT 0")?;
   ensure_column(&conn, "tasks", "sub_tasks", "TEXT DEFAULT '[]'")?;
+  ensure_column(&conn, "tasks", "tags", "TEXT DEFAULT '[]'")?;
   ensure_column(&conn, "tasks", "due_date", "TEXT DEFAULT ''")?;
   ensure_column(&conn, "tasks", "recurrence_rule", "TEXT DEFAULT ''")?;
   ensure_column(&conn, "tasks", "recurrence_parent_id", "TEXT DEFAULT ''")?;
@@ -733,6 +800,12 @@ fn open_db(path: &PathBuf) -> Result<Connection, String> {
       [],
     )
     .map_err(|err| format!("backfill sub_tasks failed: {err}"))?;
+  conn
+    .execute(
+      "UPDATE tasks SET tags = '[]' WHERE tags IS NULL OR tags = ''",
+      [],
+    )
+    .map_err(|err| format!("backfill tags failed: {err}"))?;
   conn
     .execute(
       "UPDATE tasks SET due_date = '' WHERE due_date IS NULL",
@@ -765,8 +838,8 @@ fn upsert_task(conn: &Connection, task: &Task) -> Result<(), String> {
   conn
     .execute(
       "INSERT INTO tasks (
-        record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
-      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+        record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, tags, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
       ON CONFLICT(record_id) DO UPDATE SET
         id=excluded.id,
         name=CASE WHEN tasks.source = 'feishu' AND tasks.sync_status IN ('pending', 'failed') AND excluded.source = 'feishu' THEN tasks.name ELSE excluded.name END,
@@ -785,6 +858,7 @@ fn upsert_task(conn: &Connection, task: &Task) -> Result<(), String> {
         notes=CASE WHEN tasks.source = 'feishu' AND tasks.sync_status IN ('pending', 'failed') AND excluded.source = 'feishu' THEN tasks.notes ELSE excluded.notes END,
         sort_order=excluded.sort_order,
         sub_tasks=CASE WHEN excluded.source = 'feishu' AND excluded.sub_tasks = '[]' THEN tasks.sub_tasks ELSE excluded.sub_tasks END,
+        tags=CASE WHEN excluded.source = 'feishu' AND excluded.tags = '[]' THEN tasks.tags ELSE excluded.tags END,
         due_date=CASE WHEN excluded.source = 'feishu' AND excluded.due_date = '' THEN tasks.due_date ELSE excluded.due_date END,
         recurrence_rule=CASE WHEN excluded.source = 'feishu' AND excluded.recurrence_rule = '' THEN tasks.recurrence_rule ELSE excluded.recurrence_rule END,
         recurrence_parent_id=CASE WHEN excluded.source = 'feishu' AND excluded.recurrence_parent_id = '' THEN tasks.recurrence_parent_id ELSE excluded.recurrence_parent_id END,
@@ -812,6 +886,7 @@ fn upsert_task(conn: &Connection, task: &Task) -> Result<(), String> {
         task.notes,
         task.sort_order,
         task.sub_tasks,
+        task.tags,
         task.due_date,
         task.recurrence_rule,
         task.recurrence_parent_id,
@@ -1553,6 +1628,7 @@ async fn fetch_remote_tasks(app: &AppHandle, filter_completed: bool) -> Result<V
       notes: field_string(&record.fields, "备注/收获"),
       sort_order: 0,
       sub_tasks: "[]".to_string(),
+      tags: feishu_tags_to_local_json(&field_string(&record.fields, "标签")),
       due_date: String::new(),
       recurrence_rule: String::new(),
       recurrence_parent_id: String::new(),
@@ -1589,17 +1665,95 @@ async fn feishu_update_record_fields(
     .build()
     .map_err(|err| format!("http client init failed: {err}"))?;
 
-  for attempt in 0..2 {
-    let token = get_tenant_access_token(app, attempt == 1).await?;
+  let mut force_refresh = false;
+  for _ in 0..3 {
+    let token = get_tenant_access_token(app, force_refresh).await?;
     let response = client
       .put(&endpoint)
       .header("Content-Type", "application/json")
       .header("Authorization", format!("Bearer {}", token))
-      .json(&json!({ "fields": fields }))
+      .json(&json!({ "fields": fields.clone() }))
       .send()
       .await
       .map_err(|err| format!("request failed: {err}"))?;
 
+    let status = response.status();
+    let body = response
+      .text()
+      .await
+      .map_err(|err| format!("read response failed: {err}"))?;
+
+    if !status.is_success() {
+      if let Ok(value) = serde_json::from_str::<Value>(&body) {
+        if let Some(code) = value.get("code").and_then(Value::as_i64) {
+          if is_token_invalid_code(code as i32) {
+            force_refresh = true;
+            continue;
+          }
+        }
+      }
+      return Err(build_feishu_http_error(status, &body));
+    }
+
+    let parsed: FeishuGenericResponse =
+      serde_json::from_str(&body).map_err(|err| format!("invalid response: {err}"))?;
+    if parsed.code != 0 {
+      if is_token_invalid_code(parsed.code) {
+        force_refresh = true;
+        continue;
+      }
+      return Err(format!(
+        "飞书返回错误 code={} {}",
+        parsed.code,
+        parsed.msg.unwrap_or_default()
+      ));
+    }
+
+    return Ok(());
+  }
+
+  Err("重试后仍无法更新记录".to_string())
+}
+
+fn has_feishu_field(field_names: &[String], field_name: &str) -> bool {
+  field_names.iter().any(|name| name == field_name)
+}
+
+fn insert_feishu_field_if_exists(
+  fields: &mut Value,
+  field_names: &[String],
+  field_name: &str,
+  value: Value,
+) {
+  if !has_feishu_field(field_names, field_name) {
+    return;
+  }
+  if let Some(map) = fields.as_object_mut() {
+    map.insert(field_name.to_string(), value);
+  }
+}
+
+async fn feishu_list_field_names(app: &AppHandle) -> Result<Vec<String>, String> {
+  let config = load_app_config_from_file(app)?;
+  let endpoint = format!(
+    "https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/fields",
+    config.feishu.app_token.trim(),
+    config.feishu.table_id.trim()
+  );
+  let client = reqwest::Client::builder()
+    .use_rustls_tls()
+    .build()
+    .map_err(|err| format!("http client init failed: {err}"))?;
+
+  for attempt in 0..2 {
+    let token = get_tenant_access_token(app, attempt == 1).await?;
+    let response = client
+      .get(&endpoint)
+      .query(&[("page_size", "100")])
+      .header("Authorization", format!("Bearer {}", token))
+      .send()
+      .await
+      .map_err(|err| format!("request failed: {err}"))?;
     let status = response.status();
     let body = response
       .text()
@@ -1617,23 +1771,103 @@ async fn feishu_update_record_fields(
       return Err(build_feishu_http_error(status, &body));
     }
 
-    let parsed: FeishuGenericResponse =
+    let parsed: Value =
       serde_json::from_str(&body).map_err(|err| format!("invalid response: {err}"))?;
-    if parsed.code != 0 {
-      if is_token_invalid_code(parsed.code) && attempt == 0 {
+    let code = parsed.get("code").and_then(Value::as_i64).unwrap_or(-1);
+    if code != 0 {
+      if is_token_invalid_code(code as i32) && attempt == 0 {
         continue;
       }
       return Err(format!(
         "飞书返回错误 code={} {}",
-        parsed.code,
-        parsed.msg.unwrap_or_default()
+        code,
+        parsed.get("msg").map(value_to_display_string).unwrap_or_default()
       ));
     }
 
+    let items = parsed
+      .get("data")
+      .and_then(|data| data.get("items"))
+      .and_then(Value::as_array)
+      .cloned()
+      .unwrap_or_default();
+    return Ok(items
+      .iter()
+      .filter_map(|item| item.get("field_name").and_then(Value::as_str))
+      .map(|name| name.to_string())
+      .collect());
+  }
+
+  Err("刷新 token 后仍无法读取字段列表".to_string())
+}
+
+async fn feishu_create_text_field(app: &AppHandle, field_name: &str) -> Result<(), String> {
+  let config = load_app_config_from_file(app)?;
+  let endpoint = format!(
+    "https://open.feishu.cn/open-apis/bitable/v1/apps/{}/tables/{}/fields",
+    config.feishu.app_token.trim(),
+    config.feishu.table_id.trim()
+  );
+  let client = reqwest::Client::builder()
+    .use_rustls_tls()
+    .build()
+    .map_err(|err| format!("http client init failed: {err}"))?;
+
+  for attempt in 0..2 {
+    let token = get_tenant_access_token(app, attempt == 1).await?;
+    let response = client
+      .post(&endpoint)
+      .header("Content-Type", "application/json")
+      .header("Authorization", format!("Bearer {}", token))
+      .json(&json!({ "field_name": field_name, "type": 1 }))
+      .send()
+      .await
+      .map_err(|err| format!("request failed: {err}"))?;
+    let status = response.status();
+    let body = response
+      .text()
+      .await
+      .map_err(|err| format!("read response failed: {err}"))?;
+
+    if !status.is_success() {
+      if let Ok(value) = serde_json::from_str::<Value>(&body) {
+        if let Some(code) = value.get("code").and_then(Value::as_i64) {
+          if is_token_invalid_code(code as i32) && attempt == 0 {
+            continue;
+          }
+        }
+      }
+      return Err(build_feishu_http_error(status, &body));
+    }
+
+    let parsed: Value =
+      serde_json::from_str(&body).map_err(|err| format!("invalid response: {err}"))?;
+    let code = parsed.get("code").and_then(Value::as_i64).unwrap_or(-1);
+    if code != 0 {
+      if is_token_invalid_code(code as i32) && attempt == 0 {
+        continue;
+      }
+      return Err(format!(
+        "飞书返回错误 code={} {}",
+        code,
+        parsed.get("msg").map(value_to_display_string).unwrap_or_default()
+      ));
+    }
     return Ok(());
   }
 
-  Err("刷新 token 后仍无法更新记录".to_string())
+  Err("刷新 token 后仍无法创建字段".to_string())
+}
+
+async fn feishu_prepare_write_field_names(app: &AppHandle, ensure_tags: bool) -> Result<Vec<String>, String> {
+  let mut field_names = feishu_list_field_names(app).await?;
+
+  if ensure_tags && !has_feishu_field(&field_names, "标签") {
+    feishu_create_text_field(app, "标签").await?;
+    field_names.push("标签".to_string());
+  }
+
+  Ok(field_names)
 }
 
 async fn feishu_create_record(app: &AppHandle, task: &Task) -> Result<String, String> {
@@ -1649,21 +1883,39 @@ async fn feishu_create_record(app: &AppHandle, task: &Task) -> Result<String, St
     .use_rustls_tls()
     .build()
     .map_err(|err| format!("http client init failed: {err}"))?;
-  for attempt in 0..2 {
-    let token = get_tenant_access_token(app, attempt == 1).await?;
+
+  let should_sync_tags = !normalize_tag_values(&task.tags).is_empty();
+  let field_names = match feishu_prepare_write_field_names(app, should_sync_tags).await {
+    Ok(names) => names,
+    Err(err) if should_sync_tags => return Err(err),
+    Err(err) => {
+      eprintln!("[Rust] list feishu fields failed, use core fields only: {}", err);
+      Vec::new()
+    }
+  };
+  let mut fields = json!({
+    "任务名称": task.name,
+    "状态": task.status,
+    "优先级": to_feishu_priority_value(&task.priority)
+  });
+  insert_feishu_field_if_exists(&mut fields, &field_names, "类型", Value::String(task.task_type.clone()));
+  if !task.notes.trim().is_empty() {
+    insert_feishu_field_if_exists(&mut fields, &field_names, "备注/收获", Value::String(task.notes.clone()));
+  }
+  let tags = local_tags_to_feishu_text(&task.tags);
+  if !tags.trim().is_empty() {
+    insert_feishu_field_if_exists(&mut fields, &field_names, "标签", Value::String(tags));
+  }
+
+  let mut force_refresh = false;
+  for _ in 0..3 {
+    let token = get_tenant_access_token(app, force_refresh).await?;
     let response = client
       .post(&endpoint)
+      .query(&[("client_token", idempotency_token(&task.record_id))])
       .header("Content-Type", "application/json")
       .header("Authorization", format!("Bearer {}", token))
-      .json(&json!({
-        "fields": {
-          "任务名称": task.name,
-          "状态": task.status,
-          "优先级": to_feishu_priority_value(&task.priority),
-          "类型": task.task_type,
-          "备注/收获": task.notes
-        }
-      }))
+      .json(&json!({ "fields": fields.clone() }))
       .send()
       .await
       .map_err(|err| format!("request failed: {err}"))?;
@@ -1677,7 +1929,8 @@ async fn feishu_create_record(app: &AppHandle, task: &Task) -> Result<String, St
     if !status.is_success() {
       if let Ok(value) = serde_json::from_str::<Value>(&text) {
         if let Some(code) = value.get("code").and_then(Value::as_i64) {
-          if is_token_invalid_code(code as i32) && attempt == 0 {
+          if is_token_invalid_code(code as i32) {
+            force_refresh = true;
             continue;
           }
         }
@@ -1689,7 +1942,8 @@ async fn feishu_create_record(app: &AppHandle, task: &Task) -> Result<String, St
       serde_json::from_str(&text).map_err(|err| format!("invalid response: {err}"))?;
 
     if parsed.code != 0 {
-      if is_token_invalid_code(parsed.code) && attempt == 0 {
+      if is_token_invalid_code(parsed.code) {
+        force_refresh = true;
         continue;
       }
       return Err(format!(
@@ -1717,7 +1971,7 @@ async fn feishu_create_record(app: &AppHandle, task: &Task) -> Result<String, St
       .ok_or_else(|| "创建成功但未返回 record_id".to_string());
   }
 
-  Err("刷新 token 后仍无法创建记录".to_string())
+  Err("重试后仍无法创建记录".to_string())
 }
 
 async fn feishu_delete_record(app: &AppHandle, record_id: &str) -> Result<(), String> {
@@ -1793,7 +2047,7 @@ async fn db_get_all_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, tags, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks",
       )
       .map_err(|err| format!("prepare query failed: {err}"))?;
@@ -1819,7 +2073,7 @@ async fn db_get_feishu_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, tags, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks
          WHERE source = 'feishu'",
       )
@@ -1912,6 +2166,7 @@ async fn db_update_field_pending(
       "任务创建时间" => "created_at",
       "任务更新时间" => "updated_at",
       "备注/收获" => "notes",
+      "标签" => "tags",
       _ => return Err("不支持的字段名".to_string()),
     };
 
@@ -2030,7 +2285,7 @@ async fn db_get_pending_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, tags, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks
          WHERE sync_status IN ('pending', 'failed') AND source = 'feishu'
          ORDER BY updated_at ASC",
@@ -2104,7 +2359,9 @@ fn is_non_retryable_sync_error(error: &str) -> bool {
     || text.contains("http 401")
     || text.contains("http 403")
     || text.contains("recordidnotfound")
+    || text.contains("fieldnamenotfound")
     || text.contains("code=1254043")
+    || text.contains("code=1254045")
     || text.contains("权限")
     || text.contains("字段")
     || text.contains("app token 未配置")
@@ -2117,6 +2374,34 @@ async fn db_replace_record_id(app: AppHandle, old_id: String, new_id: String) ->
   let db_path = db_file_path(&app)?;
   tokio::task::spawn_blocking(move || {
     let conn = open_db(&db_path)?;
+    let existing: Option<String> = conn
+      .query_row(
+        "SELECT record_id FROM tasks WHERE record_id = ?1",
+        params![new_id.clone()],
+        |row| row.get(0),
+      )
+      .optional()
+      .map_err(|err| format!("query replacement record failed: {err}"))?;
+
+    if existing.is_some() {
+      conn
+        .execute(
+          "UPDATE tasks
+           SET sync_status = 'synced',
+               last_synced_at = ?1,
+               retry_count = 0,
+               last_error = '',
+               last_retry_at = ''
+           WHERE record_id = ?2",
+          params![now_iso(), new_id],
+        )
+        .map_err(|err| format!("mark existing replacement synced failed: {err}"))?;
+      conn
+        .execute("DELETE FROM tasks WHERE record_id = ?1", params![old_id])
+        .map_err(|err| format!("delete old temp record failed: {err}"))?;
+      return Ok::<(), String>(());
+    }
+
     conn
       .execute(
         "UPDATE tasks SET record_id = ?1, id = ?1, feishu_record_id = ?1, source = 'feishu', sync_status = 'synced', last_synced_at = ?2 WHERE record_id = ?3",
@@ -2153,7 +2438,7 @@ async fn get_local_tasks(app: AppHandle) -> Result<Vec<Task>, String> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn
       .prepare(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, tags, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks WHERE source = 'local' ORDER BY sort_order DESC, updated_at DESC",
       )
       .map_err(|err| format!("prepare local tasks failed: {err}"))?;
@@ -2206,6 +2491,7 @@ async fn create_local_task(
     notes: String::new(),
     sort_order: max_sort + 1,
     sub_tasks: "[]".to_string(),
+    tags: "[]".to_string(),
     due_date: String::new(),
     recurrence_rule: String::new(),
     recurrence_parent_id: String::new(),
@@ -2238,7 +2524,7 @@ async fn update_local_task(
     let conn = open_db(&db_path)?;
     let mut task: Task = conn
       .query_row(
-        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
+        "SELECT record_id, id, name, status, priority, task_type, time_spent, created_at, updated_at, completed_at, notes, sort_order, sub_tasks, tags, due_date, recurrence_rule, recurrence_parent_id, recurrence_index, reminder_before, reminder_notified, source, feishu_record_id, sync_status, last_synced_at, retry_count, last_error, last_retry_at
          FROM tasks WHERE id = ?1 OR record_id = ?1",
         params![id.clone()],
         task_from_row,
@@ -2283,6 +2569,14 @@ async fn update_local_task(
       } else {
         v.to_string()
       };
+    }
+    if let Some(v) = fields.get("tags") {
+      task.tags = if v.trim().is_empty() {
+        "[]".to_string()
+      } else {
+        v.to_string()
+      };
+      sync_affecting = true;
     }
     if let Some(v) = fields.get("due_date") {
       task.due_date = v.trim().to_string();
@@ -3762,10 +4056,10 @@ async fn update_task(
   )
   .await?;
 
-  let remote_value = if field_name.trim() == "优先级" {
-    to_feishu_priority_value(&value)
-  } else {
-    value.clone()
+  let remote_value = match field_name.trim() {
+    "优先级" => to_feishu_priority_value(&value),
+    "标签" => local_tags_to_feishu_text(&value),
+    _ => value.clone(),
   };
   let fields = json!({ field_name.trim(): remote_value });
   match feishu_update_record_fields(&app, record_id.trim(), fields).await {
@@ -3788,6 +4082,53 @@ async fn update_task(
         },
       })
     }
+  }
+}
+
+#[tauri::command]
+async fn sync_task_tags(
+  app: AppHandle,
+  record_id: String,
+  tags: String,
+) -> Result<UpdateTaskResult, String> {
+  let rid = record_id.trim();
+  if rid.is_empty() {
+    return Err("record_id 不能为空".to_string());
+  }
+  if rid.starts_with("temp-") {
+    return Ok(UpdateTaskResult {
+      success: false,
+      message: "任务尚未同步到飞书，稍后会自动重试".to_string(),
+    });
+  }
+
+  let field_names = match feishu_prepare_write_field_names(&app, true).await {
+    Ok(names) => names,
+    Err(err) => {
+      return Ok(UpdateTaskResult {
+        success: false,
+        message: format!("标签同步失败：{err}"),
+      })
+    }
+  };
+  if !has_feishu_field(&field_names, "标签") {
+    return Ok(UpdateTaskResult {
+      success: false,
+      message: "未能创建或找到飞书字段：标签".to_string(),
+    });
+  }
+
+  let value = local_tags_to_feishu_text(&tags);
+  let fields = json!({ "标签": value });
+  match feishu_update_record_fields(&app, rid, fields).await {
+    Ok(_) => Ok(UpdateTaskResult {
+      success: true,
+      message: "标签同步成功".to_string(),
+    }),
+    Err(err) => Ok(UpdateTaskResult {
+      success: false,
+      message: format!("标签同步失败：{err}"),
+    }),
   }
 }
 
@@ -3817,6 +4158,7 @@ async fn create_task(
     notes: String::new(),
     sort_order: 0,
     sub_tasks: "[]".to_string(),
+    tags: "[]".to_string(),
     due_date: String::new(),
     recurrence_rule: String::new(),
     recurrence_parent_id: String::new(),
@@ -3919,16 +4261,33 @@ async fn sync_tasks(
       continue;
     }
 
-    let fields = json!({
+    let should_sync_tags = !normalize_tag_values(&task.tags).is_empty();
+    let field_names = match feishu_prepare_write_field_names(&app, should_sync_tags).await {
+      Ok(names) => names,
+      Err(err) if should_sync_tags => {
+        let retryable = !is_non_retryable_sync_error(&err);
+        let _ = db_mark_push_result(app.clone(), task.record_id.clone(), err, retryable).await;
+        continue;
+      }
+      Err(err) => {
+        eprintln!("[Rust] list feishu fields failed during sync, use core fields only: {}", err);
+        Vec::new()
+      }
+    };
+
+    let mut fields = json!({
       "任务名称": task.name,
       "状态": task.status,
       "优先级": to_feishu_priority_value(&task.priority),
-      "类型": task.task_type,
-      "实际耗时(分钟)": task.time_spent,
-      "任务创建时间": task.created_at,
-      "任务更新时间": task.updated_at,
-      "备注/收获": task.notes,
     });
+    insert_feishu_field_if_exists(&mut fields, &field_names, "类型", Value::String(task.task_type.clone()));
+    if !task.notes.trim().is_empty() {
+      insert_feishu_field_if_exists(&mut fields, &field_names, "备注/收获", Value::String(task.notes.clone()));
+    }
+    let tags = local_tags_to_feishu_text(&task.tags);
+    if !tags.trim().is_empty() {
+      insert_feishu_field_if_exists(&mut fields, &field_names, "标签", Value::String(tags));
+    }
 
     match feishu_update_record_fields(&app, &task.record_id, fields).await {
       Ok(_) => {
@@ -4035,6 +4394,7 @@ pub fn run() {
       get_cached_tasks,
       cache_tasks,
       update_task,
+      sync_task_tags,
       create_task,
       delete_task,
       sync_tasks,

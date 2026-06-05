@@ -56,7 +56,7 @@
 
         <div class="sheet-group">
           <p class="group-title">新建 / 编辑</p>
-          <div class="row"><span>创建任务</span><kbd>Enter / ⌘S</kbd></div>
+          <div class="row"><span>新建面板内创建</span><kbd>⌘Enter</kbd></div>
           <div class="row"><span>双击任务标题</span><kbd>编辑名称</kbd></div>
           <div class="row"><span>回车 / 失焦</span><kbd>保存名称</kbd></div>
           <div class="row"><span>Esc</span><kbd>取消编辑</kbd></div>

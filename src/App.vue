@@ -174,7 +174,7 @@
             :value="taskStore.searchQuery"
             type="text"
             class="search-panel__input"
-            placeholder="搜索任务名称或备注"
+            placeholder="搜索任务名称、备注或标签"
             @input="taskStore.setSearchQuery(($event.target as HTMLInputElement).value)"
           />
           <div class="search-panel__meta">
@@ -248,8 +248,9 @@ interface QuickTaskTemplate {
   dueTime?: string;
   recurrenceRule?: RecurrenceRule | null;
   reminderBefore?: number | null;
+  tags?: string[];
   notes?: string;
-  expand?: 'priority' | 'date' | 'repeat' | 'reminder' | null;
+  expand?: 'priority' | 'tags' | 'date' | 'repeat' | 'reminder' | null;
 }
 
 interface CreatedTaskPayload {
@@ -914,7 +915,7 @@ function onGlobalKeydown(event: KeyboardEvent) {
   }
 
   if (currentView.value !== 'main') return;
-  if (editable && !isMeta) return;
+  if (editable) return;
 
   if (event.key === 'ArrowUp') {
     event.preventDefault();

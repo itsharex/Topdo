@@ -57,6 +57,7 @@ const icons: Record<string, string> = {
   lock: '<rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
   key: '<circle cx="7.5" cy="14.5" r="3.5"/><path d="M10 12l8-8"/><path d="M15 7l2 2"/><path d="M17 5l2 2"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.1.4l2.2-2.2a5 5 0 0 0-7.1-7.1L11 5.3"/><path d="M14 11a5 5 0 0 0-7.1-.4l-2.2 2.2a5 5 0 0 0 7.1 7.1L13 18.7"/>',
+  tag: '<path d="M20 12.5 12.5 20a2.2 2.2 0 0 1-3.1 0L4 14.6V4h10.6L20 9.4a2.2 2.2 0 0 1 0 3.1z"/><circle cx="8.5" cy="8.5" r="1.2"/>',
   'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.2 2.2 4.8-5"/>',
   update: '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/><path d="M12 16V8"/><path d="M9 11l3-3 3 3"/>',
   pin: '<path d="M14 3l7 7-3 1-4 4v4l-2 2-3.5-3.5L5 21l-2-2 6-6-3.5-3.5 2-2h4l4-4 1-3z"/>',

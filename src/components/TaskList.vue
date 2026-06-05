@@ -48,12 +48,25 @@
         @dragover.prevent="canDropInGroup(group) && onGroupDragOver(group, $event)"
         @drop.prevent="canDropInGroup(group) && onDropOnGroup(group.priority)"
       >
-        <div class="task-group__header">
-          <span>{{ group.label }}</span>
+        <button
+          type="button"
+          class="task-group__header"
+          :class="{ 'task-group__header--static': !isGroupCollapsible(group.key) }"
+          :aria-expanded="isGroupCollapsible(group.key) ? !isGroupCollapsed(group.key) : undefined"
+          @click="isGroupCollapsible(group.key) && toggleGroupCollapse(group.key)"
+        >
+          <span class="task-group__title">
+            <span
+              v-if="isGroupCollapsible(group.key)"
+              class="task-group__chevron"
+              :class="{ collapsed: isGroupCollapsed(group.key) }"
+            >⌄</span>
+            {{ group.label }}
+          </span>
           <span>{{ group.tasks.length }}</span>
-        </div>
+        </button>
         <div
-          v-for="task in group.tasks"
+          v-for="task in isGroupCollapsed(group.key) ? [] : group.tasks"
           :key="task.record_id"
           :data-task-id="task.record_id"
           class="task-draggable"
@@ -95,7 +108,7 @@
           />
         </div>
         <div
-          v-if="canDropInGroup(group)"
+          v-if="!isGroupCollapsed(group.key) && canDropInGroup(group)"
           class="task-drop-tail"
           :class="{ active: isGroupTailActive(group) }"
           @dragover.prevent="onGroupTailDragOver(group, $event)"
@@ -123,8 +136,9 @@ interface QuickTaskTemplate {
   dueTime?: string;
   recurrenceRule?: RecurrenceRule | null;
   reminderBefore?: number | null;
+  tags?: string[];
   notes?: string;
-  expand?: 'priority' | 'date' | 'repeat' | 'reminder' | null;
+  expand?: 'priority' | 'tags' | 'date' | 'repeat' | 'reminder' | null;
 }
 
 interface CreatedTaskPayload {
@@ -163,6 +177,7 @@ const dragOverPlacement = ref<'before' | 'after'>('before');
 const pointerDragActive = ref(false);
 const itemRefs = new Map<string, any>();
 const DRAG_ACTIVATION_DISTANCE = 6;
+const COLLAPSED_GROUPS_KEY = 'topdo_priority_groups_collapsed_v1';
 let pointerDragMoved = false;
 let pointerStartX = 0;
 let pointerStartY = 0;
@@ -222,6 +237,36 @@ type TaskGroup = {
   droppable: boolean;
   tasks: Task[];
 };
+
+function loadCollapsedGroups(): Record<string, boolean> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(COLLAPSED_GROUPS_KEY) || '{}') || {};
+    delete stored.urgent;
+    return stored;
+  } catch {
+    return {};
+  }
+}
+
+const collapsedGroups = ref<Record<string, boolean>>(loadCollapsedGroups());
+
+function isGroupCollapsed(groupKey: string): boolean {
+  if (!isGroupCollapsible(groupKey)) return false;
+  return Boolean(collapsedGroups.value[groupKey]);
+}
+
+function isGroupCollapsible(groupKey: string): boolean {
+  return groupKey === 'important' || groupKey === 'normal';
+}
+
+function toggleGroupCollapse(groupKey: string) {
+  if (!isGroupCollapsible(groupKey)) return;
+  collapsedGroups.value = {
+    ...collapsedGroups.value,
+    [groupKey]: !collapsedGroups.value[groupKey]
+  };
+  localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(collapsedGroups.value));
+}
 
 const groupedTasks = computed(() => {
   const groups = priorityGroups
@@ -860,12 +905,46 @@ onBeforeUnmount(() => {
 
 .task-group__header {
   margin: 10px 12px 2px;
+  width: calc(100% - 24px);
+  padding: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  border: 0;
+  background: transparent;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-tertiary);
+  font-family: var(--font-family);
+  cursor: pointer;
+}
+
+.task-group__header:hover {
+  color: var(--text-secondary);
+}
+
+.task-group__header--static {
+  cursor: default;
+}
+
+.task-group__header--static:hover {
+  color: var(--text-tertiary);
+}
+
+.task-group__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-group__chevron {
+  display: inline-block;
+  color: var(--text-placeholder);
+  transition: transform 0.15s ease;
+}
+
+.task-group__chevron.collapsed {
+  transform: rotate(-90deg);
 }
 
 .task-draggable.dragging,

@@ -21,9 +21,10 @@
           ref="inputRef"
           v-model="taskName"
           class="task-input"
-          placeholder="输入任务名称..."
-          @keydown.meta.s.prevent="handleCreate"
-          @keydown.enter.prevent="handleCreate"
+          placeholder="输入任务名称，⌘↵ 创建"
+          @compositionstart="isTaskNameComposing = true"
+          @compositionend="isTaskNameComposing = false"
+          @keydown.enter="onTaskNameEnter"
           @keydown.esc.prevent="handleCancel"
         />
         <div class="input-divider" aria-hidden="true"></div>
@@ -53,6 +54,44 @@
             >
               <span class="chip-dot" :style="{ background: option.dot }"></span>{{ option.label }}
             </button>
+          </div>
+        </section>
+
+        <section v-if="expandedOption !== 'tags'" class="opt-row" @click="toggleOption('tags')">
+          <div class="opt-icon opt-icon--cyan"><Icon name="tag" :size="13" /></div>
+          <span class="opt-title">标签</span>
+          <span class="opt-value">{{ tagsSummary }}</span>
+          <span class="opt-arrow">›</span>
+        </section>
+        <section v-else class="opt-expanded">
+          <div class="opt-exp-header">
+            <div class="opt-icon opt-icon--cyan"><Icon name="tag" :size="13" /></div>
+            <span class="opt-exp-title">标签</span>
+            <button type="button" class="opt-collapse" @click="expandedOption = null">收起 ‹</button>
+          </div>
+          <div class="tag-picker">
+            <button
+              v-for="tag in tagOptions"
+              :key="tag"
+              type="button"
+              class="tag-chip"
+              :class="{ selected: selectedTags.includes(tag) }"
+              @click="toggleTag(tag)"
+            >
+              {{ tag }}
+            </button>
+            <p v-if="!tagOptions.length" class="tag-empty-hint">输入后会保留最近 5 个标签</p>
+          </div>
+          <div class="tag-input-row">
+            <input
+              v-model="tagDraft"
+              type="text"
+              placeholder="自定义标签，回车添加"
+              @compositionstart="isTagComposing = true"
+              @compositionend="isTagComposing = false"
+              @keydown.enter="onTagInputEnter"
+            />
+            <button type="button" @click="addTagDraft">添加</button>
           </div>
         </section>
 
@@ -179,7 +218,14 @@
         <ul v-if="subTasks.length" class="sub-list">
           <li v-for="item in subTasks" :key="item.id" class="sub-item">
             <span class="sub-circle" aria-hidden="true"></span>
-            <input v-model="item.text" class="sub-input" placeholder="子任务名称" @keydown.enter.prevent="addSubTask" />
+            <input
+              v-model="item.text"
+              class="sub-input"
+              placeholder="子任务名称"
+              @compositionstart="isSubTaskComposing = true"
+              @compositionend="isSubTaskComposing = false"
+              @keydown.enter="onSubTaskEnter"
+            />
             <button type="button" class="sub-remove" title="删除子任务" @click="removeSubTask(item.id)">×</button>
           </li>
         </ul>
@@ -203,9 +249,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useTaskStore } from '../stores/taskStore';
 import type { RecurrenceRule, SubTask } from '../types';
 import { buildDueDateValue } from '../utils/dueDate';
+import { isImeComposing } from '../utils/keyboard';
 import Icon from './Icon.vue';
 
-type ExpandedOption = 'priority' | 'date' | 'repeat' | 'reminder' | null;
+type ExpandedOption = 'priority' | 'tags' | 'date' | 'repeat' | 'reminder' | null;
 type RepeatValue = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
 
 interface QuickInputTemplate {
@@ -215,6 +262,7 @@ interface QuickInputTemplate {
   dueTime?: string;
   recurrenceRule?: RecurrenceRule | null;
   reminderBefore?: number | null;
+  tags?: string[];
   notes?: string;
   expand?: ExpandedOption;
 }
@@ -247,11 +295,16 @@ const selectedDueDate = ref('');
 const selectedDueTime = ref('');
 const selectedRecurrenceRule = ref<RecurrenceRule | null>(null);
 const selectedReminderBefore = ref<number | null>(null);
+const selectedTags = ref<string[]>([]);
+const tagDraft = ref('');
 const subTasks = ref<SubTask[]>([]);
 const note = ref('');
 const submitting = ref(false);
 const expandedOption = ref<ExpandedOption>(null);
 const calendarMonth = ref(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+const isTaskNameComposing = ref(false);
+const isTagComposing = ref(false);
+const isSubTaskComposing = ref(false);
 
 const priorityOptions = [
   { value: '普通', label: '普通', dot: '#8E8E93', tone: 'normal' },
@@ -288,6 +341,8 @@ const weekLabels = ['日', '一', '二', '三', '四', '五', '六'];
 const weekdayOptions = weekLabels.map((label, value) => ({ label, value }));
 
 const prioritySummary = computed(() => priorityOptions.find((item) => item.value === selectedPriority.value) || priorityOptions[0]);
+const tagOptions = computed(() => mergeTagOptions(taskStore.recentTags, selectedTags.value));
+const tagsSummary = computed(() => selectedTags.value.length ? selectedTags.value.join('、') : '无');
 const dueDateSummary = computed(() => {
   if (!selectedDueDate.value) return '无日期';
   const dateLabel = formatDueDateSummary(selectedDueDate.value);
@@ -370,6 +425,58 @@ function selectPriority(value: string) {
   expandedOption.value = null;
 }
 
+function normalizeTag(value: string): string {
+  return value.trim().replace(/^#/, '').slice(0, 16);
+}
+
+function mergeTagOptions(...groups: string[][]): string[] {
+  const seen = new Set<string>();
+  const options: string[] = [];
+  for (const tag of groups.flat()) {
+    const normalized = normalizeTag(tag);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    options.push(normalized);
+    if (options.length >= 5) break;
+  }
+  return options;
+}
+
+function addTag(value: string) {
+  const tag = normalizeTag(value);
+  if (!tag) return;
+  if (selectedTags.value.some((item) => item.toLowerCase() === tag.toLowerCase())) return;
+  if (selectedTags.value.length >= 5) return;
+  selectedTags.value = [...selectedTags.value, tag].slice(0, 5);
+}
+
+function addTagDraft() {
+  tagDraft.value
+    .split(/[，,\s]+/)
+    .forEach((tag) => addTag(tag));
+  tagDraft.value = '';
+}
+
+function toggleTag(tag: string) {
+  if (selectedTags.value.includes(tag)) {
+    removeTag(tag);
+    return;
+  }
+  addTag(tag);
+}
+
+function removeTag(tag: string) {
+  selectedTags.value = selectedTags.value.filter((item) => item !== tag);
+}
+
+function onTagInputEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isTagComposing.value)) return;
+  event.preventDefault();
+  addTagDraft();
+}
+
 function onDateOptionUpdate(value: string | number | null) {
   if (typeof value === 'string') {
     selectedDateOption.value = value;
@@ -430,6 +537,8 @@ function selectReminder(value: number | null) {
 function reset() {
   taskName.value = '';
   selectedPriority.value = '普通';
+  selectedTags.value = [];
+  tagDraft.value = '';
   selectedDateOption.value = null;
   selectedDueDate.value = '';
   selectedDueTime.value = '';
@@ -444,6 +553,8 @@ function applyTemplate(template: QuickInputTemplate | null | undefined) {
   if (!template) return;
   taskName.value = template.name || '';
   selectedPriority.value = template.priority || '普通';
+  selectedTags.value = [...(template.tags || [])];
+  tagDraft.value = '';
   selectedDueDate.value = template.dueDate || '';
   selectedDateOption.value = template.dueDate || null;
   selectedDueTime.value = template.dueDate ? (template.dueTime || '23:59') : '';
@@ -483,9 +594,24 @@ function removeSubTask(id: string) {
   subTasks.value = subTasks.value.filter((item) => item.id !== id);
 }
 
+function onTaskNameEnter(event: KeyboardEvent) {
+  event.stopPropagation();
+  if (isImeComposing(event, isTaskNameComposing.value)) return;
+  if (!event.metaKey) return;
+  event.preventDefault();
+  void handleCreate();
+}
+
+function onSubTaskEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isSubTaskComposing.value)) return;
+  event.preventDefault();
+  addSubTask();
+}
+
 async function handleCreate() {
   const name = taskName.value.trim();
   if (!name || submitting.value) return;
+  addTagDraft();
   const dueDate = buildDueDateValue(selectedDueDate.value, selectedDueTime.value);
 
   const payload = {
@@ -495,6 +621,7 @@ async function handleCreate() {
     due_date: dueDate,
     notes: note.value.trim(),
     sub_tasks: subTasks.value.filter((item) => item.text.trim()).map((item) => ({ ...item, text: item.text.trim() })),
+    tags: selectedTags.value,
     recurrence_rule: selectedRecurrenceRule.value,
     reminder_before: selectedReminderBefore.value
   };
@@ -661,6 +788,7 @@ watch(
 .opt-icon--green { color: var(--accent-green); background: var(--accent-green-soft); }
 .opt-icon--purple { color: var(--accent-purple); background: var(--accent-purple-soft); }
 .opt-icon--orange { color: var(--accent-amber); background: var(--accent-amber-soft); }
+.opt-icon--cyan { color: var(--accent-cyan); background: var(--accent-cyan-soft); }
 .opt-icon--gray { color: var(--text-tertiary); background: var(--bg-secondary); }
 
 .opt-title {
@@ -772,6 +900,77 @@ watch(
   width: 5px;
   height: 5px;
   border-radius: 50%;
+}
+
+.tag-picker,
+.tag-input-row {
+  margin-left: 36px;
+}
+
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tag-chip {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tag-chip.selected {
+  color: var(--accent-cyan);
+  border-color: color-mix(in srgb, var(--accent-cyan) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent-cyan) 10%, var(--bg-solid));
+}
+
+.tag-empty-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.tag-input-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.tag-input-row input {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-input-row input:focus {
+  border-color: var(--accent-cyan);
+}
+
+.tag-input-row button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cyan) 35%, var(--border));
+  border-radius: 9px;
+  background: var(--bg-solid);
+  color: var(--accent-cyan);
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .date-time-row {

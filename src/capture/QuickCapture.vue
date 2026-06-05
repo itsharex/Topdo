@@ -6,7 +6,9 @@
       v-model="taskName"
       class="capture-input"
       placeholder="输入任务名，回车创建..."
-      @keydown.enter.prevent="handleCreate"
+      @compositionstart="isTaskNameComposing = true"
+      @compositionend="isTaskNameComposing = false"
+      @keydown.enter="onTaskNameEnter"
       @keydown.escape.prevent="handleClose"
     />
     <kbd>{{ shortcutLabel }}</kbd>
@@ -21,10 +23,12 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import Icon from '../components/Icon.vue';
 import { useTaskStore } from '../stores/taskStore';
 import { buildDueDateValue } from '../utils/dueDate';
+import { isImeComposing } from '../utils/keyboard';
 
 const taskStore = useTaskStore();
 const taskName = ref('');
 const inputRef = ref<HTMLInputElement | null>(null);
+const isTaskNameComposing = ref(false);
 const shortcutLabel = '⌥Space';
 let unlisten: (() => void) | null = null;
 
@@ -44,6 +48,12 @@ async function handleCreate() {
   } catch (error) {
     console.error('快速新建任务失败:', error);
   }
+}
+
+function onTaskNameEnter(event: KeyboardEvent) {
+  if (isImeComposing(event, isTaskNameComposing.value)) return;
+  event.preventDefault();
+  void handleCreate();
 }
 
 async function handleClose() {
